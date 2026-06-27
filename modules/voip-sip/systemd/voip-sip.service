@@ -1,0 +1,16 @@
+[Unit]
+Description=Routing Core - VoIP/SIP module
+After=network.target routing-core.service
+Requires=routing-core.service
+
+[Service]
+ExecStart=/opt/routing-core/bin/voip-sip
+Restart=on-failure
+RestartSec=2
+WatchdogSec=10
+User=routingcore
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

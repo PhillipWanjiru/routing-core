@@ -1,0 +1,46 @@
+syntax = "proto3";
+package routing_core.cdr;
+
+// Metadata only. Content recording is a separate, explicit opt-in in
+// services/tracing-cdr/content-vault with its own encryption key.
+message CallDetailRecord {
+  string trace_id           = 1;
+  string call_id            = 2;
+  string from_party         = 3;
+  string to_party           = 4;
+  int64  start_ns           = 5;
+  int64  end_ns             = 6;
+  string termination_cause  = 7;
+  string codec              = 8;
+  repeated string path_hops = 9;
+  double avg_jitter_ms      = 10;
+  double packet_loss_pct    = 11;
+  double mos_score          = 12;  // ITU-T E-model derived
+  string handled_by_node    = 13;
+  bool   srtp_used          = 14;
+  bool   turn_relay_used    = 15;
+}
+
+message MessageDetailRecord {
+  string trace_id        = 1;
+  string message_id      = 2;
+  string from_party      = 3;
+  string to_party        = 4;
+  int64  submitted_ns    = 5;
+  int64  delivered_ns    = 6;
+  string channel         = 7;
+  string delivery_status = 8;
+  int32  attempts        = 9;
+}
+
+// Hash-chained, append-only. Every trace/CDR access -- including by the
+// admin -- writes one entry. prev_hash makes tampering detectable.
+message AccessAuditEntry {
+  string entry_id        = 1;
+  string actor           = 2;
+  string action          = 3;   // query_trace | export_cdr | play_recording
+  string target_trace_id = 4;
+  int64  timestamp_ns    = 5;
+  string prev_hash       = 6;
+  string entry_hash      = 7;
+}

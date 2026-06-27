@@ -1,0 +1,24 @@
+[package]
+name    = "voip-sip-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+voip-sip = { path = ".." }
+
+[[bin]]
+name = "fuzz_sip_parser"
+path = "fuzz_targets/fuzz_sip_parser.rs"
+test = false
+doc  = false
+
+[[bin]]
+name = "fuzz_sdp_parser"
+path = "fuzz_targets/fuzz_sdp_parser.rs"
+test = false
+doc  = false

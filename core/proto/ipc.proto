@@ -1,0 +1,87 @@
+syntax = "proto3";
+package routing_core.ipc;
+
+// Every inter-module message on the IPC bus is wrapped in an Envelope.
+// The trace_id rides along regardless of payload type so every hop is
+// attributable in the CDR pipeline.
+message Envelope {
+  string trace_id    = 1;   // ULID, assigned once at ingress
+  string src_module  = 2;
+  int64  timestamp_ns = 3;
+  oneof payload {
+    CallSetupRequest  call_setup      = 10;
+    CallTeardown      call_teardown   = 11;
+    RouteQuery        route_query     = 12;
+    RouteResponse     route_response  = 13;
+    HealthPing        health_ping     = 14;
+    Span              trace_span      = 15;
+    PresenceUpdate    presence        = 16;
+    QueueItem         queue_item      = 17;
+    FirewallPunchCmd  fw_punch        = 18;
+  }
+}
+
+message CallSetupRequest {
+  string from_party      = 1;
+  string to_party        = 2;
+  string preferred_codec = 3;
+  bool   srtp_required   = 4;
+  string sdp_offer       = 5;
+}
+
+message CallTeardown {
+  string call_id          = 1;
+  string reason           = 2;
+  double duration_seconds = 3;
+}
+
+message RouteQuery {
+  string to_party          = 1;
+  repeated string exclude  = 2;
+  int32  max_paths         = 3;
+}
+
+message RouteResponse {
+  string path_id        = 1;
+  double score          = 2;
+  repeated string hops  = 3;
+}
+
+// Tells the firewall module to punch/close an RTP port pair.
+message FirewallPunchCmd {
+  string action       = 1;  // "open" | "close"
+  string src_ip       = 2;
+  int32  src_rtp_port = 3;
+  int32  dst_rtp_port = 4;
+  string call_id      = 5;
+}
+
+message HealthPing {
+  string module  = 1;
+  string status  = 2;  // online | draining | maintenance | degraded
+  int64  seq     = 3;
+}
+
+message Span {
+  string span_id        = 1;
+  string parent_span_id = 2;
+  string module         = 3;
+  int64  start_ns       = 4;
+  int64  end_ns         = 5;
+  string outcome        = 6;
+  map<string, string> attrs = 7;
+}
+
+message PresenceUpdate {
+  string party   = 1;
+  string status  = 2;   // online | offline | busy
+  int64  ttl_s   = 3;
+}
+
+message QueueItem {
+  string item_id   = 1;
+  string target    = 2;
+  string channel   = 3;
+  bytes  payload   = 4;
+  int32  attempt   = 5;
+}
