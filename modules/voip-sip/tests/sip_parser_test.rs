@@ -2,7 +2,7 @@
 //!
 //! RFC 3261 §20 example messages are used as ground truth.
 
-use voip_sip::sip::parser::{parse_message, Method, StartLine};
+use voip_sip::sip::parser::{parse_message, Method};
 use voip_sip::sip::sdp::parse_sdp;
 
 // ─── Method parsing ───────────────────────────────────────────
@@ -164,7 +164,6 @@ fn parse_empty_input_is_error() {
 
 #[test]
 fn parse_truncated_header_is_incomplete() {
-    use voip_sip::sip::parser::ParseError;
     let raw = b"INVITE sip:bob@biloxi.com SIP/2.0\r\nVia: SIP/2.0/UDP";
     // Truncated mid-header — should be Incomplete, not a crash.
     let result = parse_message(raw);

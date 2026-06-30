@@ -49,7 +49,7 @@ pub fn transition(
 ) -> Result<ModuleStatus> {
     let next = match (current, &event) {
         // Normal operation cycle.
-        (ModuleStatus::Online, HealthEvent::DrainRequested { reason }) => {
+        (ModuleStatus::Online, HealthEvent::DrainRequested { reason: _ }) => {
             ModuleStatus::Draining
         }
         (ModuleStatus::Draining, HealthEvent::DrainComplete) => {

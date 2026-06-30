@@ -3,7 +3,7 @@
 use crate::{
     ipc::{codec, framing},
     module_registry::{health::ModuleStatus, registry::ModuleRegistry},
-    proto::{Envelope, Payload, HealthPing},
+    proto::{Payload},
 };
 use anyhow::{Context, Result};
 use std::{path::PathBuf, sync::Arc};

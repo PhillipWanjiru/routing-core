@@ -46,10 +46,7 @@ impl Watchdog {
     }
 
     /// Returns true if the module sent a heartbeat within the last interval.
-    fn received_recent_heartbeat(&self, name: &str) -> bool {
-        use crate::module_registry::registry::ModuleEntry;
-        use dashmap::DashMap;
-
+    fn received_recent_heartbeat(&self, _name: &str) -> bool {
         // We check the last_heartbeat timestamp directly via the registry's
         // inner map.  The registry exposes a heartbeat() method that sets it;
         // we read it through the snapshot mechanism for safety.

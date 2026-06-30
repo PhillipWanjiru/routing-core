@@ -1,11 +1,11 @@
 //! Routing engine sub-modules.
-//! Phase 1: Erlang B/C math only.
-//! Phase 2: path scoring, graph, link-state flooding.
 
+pub mod engine;
 pub mod erlang;
+pub mod graph;
+pub mod link_state;
+pub mod path_scoring;
 
-// Phase 2 additions:
-// pub mod engine;
-// pub mod graph;
-// pub mod link_state;
-// pub mod path_scoring;
+pub use engine::{RoutingEngine, RouteRequest, RouteResult};
+pub use erlang::{erlang_b, erlang_b_inverse, erlang_c, offered_traffic};
+pub use path_scoring::{score_path, PathMetrics, ScoreWeights};

@@ -27,11 +27,10 @@
 
 use nom::{
     branch::alt,
-    bytes::complete::{tag, tag_no_case, take, take_till, take_while, take_while1},
-    character::complete::{char, crlf, digit1, line_ending, not_line_ending, space0, space1},
-    combinator::{map, map_res, opt, recognize},
+    bytes::complete::{tag_no_case, take, take_while1},
+    character::complete::{char, crlf, digit1, not_line_ending, space0, space1},
+    combinator::{map, map_res},
     multi::many0,
-    sequence::{delimited, pair, preceded, terminated, tuple},
     IResult,
 };
 use std::fmt;
