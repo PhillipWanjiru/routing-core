@@ -22,3 +22,7 @@ tracing-subscriber = "=0.3.18"
 
 [dev-dependencies]
 routing-core = { path = "../../core" }
+
+[[bin]]
+name = "sip-uac-test"
+path = "src/bin/sip_uac_test.rs"
