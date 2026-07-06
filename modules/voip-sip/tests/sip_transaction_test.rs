@@ -186,7 +186,7 @@ fn registrar_basic_register_and_lookup() {
 
 #[test]
 fn registrar_expire_zero_removes_binding() {
-    use voip_sip::sip::registrar::{Registrar, RegisterResult};
+    use voip_sip::sip::registrar::Registrar;
     let reg = Registrar::new(3600, 7200, 60);
     reg.register("sip:bob@example.com", "sip:bob@10.0.0.1", "10.0.0.1", Some(600), "id1", 1);
     assert!(reg.is_registered("sip:bob@example.com"));
