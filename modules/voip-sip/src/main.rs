@@ -293,10 +293,25 @@ async fn run_rtp_receiver(label: &str, socket: UdpSocket, expected_frames: u32) 
         let jitter_ms = recv_session.jitter_ms(ssrc);
         let loss_pct  = recv_session.loss_fraction(ssrc) * 100.0;
 
+        // One-way latency on `lo` is physically sub-millisecond — there is
+        // no real network path to traverse. We label this as an assumption
+        // rather than a measurement: true one-way latency requires RTCP
+        // SR/RR round-trip timing (LSR/DLSR), which is not yet implemented
+        // (see rtp/mod.rs — rtcp.rs is still a Phase 3-continuation stub).
+        // Packet loss below, by contrast, IS a real measurement from RTP
+        // sequence tracking, not an assumption.
+        const LOOPBACK_LATENCY_ASSUMPTION_MS: f64 = 1.0;
+        let mos = rtp::mos::estimate_mos(
+            LOOPBACK_LATENCY_ASSUMPTION_MS,
+            loss_pct,
+            rtp::mos::CODEC_IE_G711,
+        );
+        let rating = rtp::mos::mos_rating(mos);
+
         tracing::info!(
             "{label}   RTP receive summary: {frames_in} frames, \
              {auth_failures} SRTP auth failures, \
-             jitter={jitter_ms:.2}ms (RFC 3550), loss={loss_pct:.2}%, \
+             jitter={jitter_ms:.2}ms (RFC 3550), loss={loss_pct:.2}% (measured), \
              jitter-buffer depth={:.1}ms, packets played={}",
             jitter_buf.current_depth_ms(),
             jitter_buf.packets_played,
@@ -307,8 +322,13 @@ async fn run_rtp_receiver(label: &str, socket: UdpSocket, expected_frames: u32) 
                 s.fraction_lost, s.cumulative_lost, s.extended_max_seq
             );
         }
+        tracing::info!(
+            "{label}   MOS (E-model, ITU-T G.107): {mos:.2} ({rating}) \
+             — latency={LOOPBACK_LATENCY_ASSUMPTION_MS}ms [assumed, loopback], \
+             loss={loss_pct:.2}% [measured]",
+        );
         if auth_failures == 0 && loss_pct < 5.0 {
-            tracing::info!("{label}   RESULT: PASS — encrypted media received, authenticated, decoded");
+            tracing::info!("{label}   RESULT: PASS — encrypted media received, authenticated, decoded, MOS {mos:.2}");
         } else {
             tracing::warn!("{label}   RESULT: DEGRADED — check auth failures / loss above");
         }
