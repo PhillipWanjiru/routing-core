@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members  = ["core", "modules/voip-sip"]
+members  = ["core", "modules/voip-sip", "modules/nat-traversal"]
 exclude  = ["modules/voip-sip/fuzz", "modules/nat-traversal/fuzz"]
 
 [workspace.dependencies]

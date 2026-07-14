@@ -1,0 +1,19 @@
+[package]
+name    = "nat-traversal"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "nat-traversal"
+path = "src/main.rs"
+
+[dependencies]
+routing-core       = { path = "../../core" }
+tokio              = { workspace = true }
+nom                = { workspace = true }
+anyhow             = { workspace = true }
+tracing            = { workspace = true }
+tracing-subscriber = "=0.3.18"
+
+[dev-dependencies]
+routing-core = { path = "../../core" }
