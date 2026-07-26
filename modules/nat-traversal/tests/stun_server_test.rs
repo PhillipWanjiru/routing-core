@@ -38,16 +38,21 @@ fn encode_decode_round_trip_exhaustive() {
 
     for &class in &classes {
         for method_bits in 0u16..4096 {
-            // Method::Extension(1) and Method::Binding both encode to
-            // method_bits=1, but decode always produces Method::Binding
-            // specifically for that value — never Extension(1). The
-            // expected round-trip result must account for this, not
-            // assume naive input==output identity.
+            // Several method_bits values now map to named variants
+            // (Binding, Allocate, Refresh, Send, Data, CreatePermission,
+            // ChannelBind) rather than round-tripping as Extension(m) —
+            // the expected result must reflect that, not assume naive
+            // input==output identity.
             let input_method = Method::Extension(method_bits);
-            let expected_method = if method_bits == 1 {
-                Method::Binding
-            } else {
-                Method::Extension(method_bits)
+            let expected_method = match method_bits {
+                0x001 => Method::Binding,
+                0x003 => Method::Allocate,
+                0x004 => Method::Refresh,
+                0x006 => Method::Send,
+                0x007 => Method::Data,
+                0x008 => Method::CreatePermission,
+                0x009 => Method::ChannelBind,
+                other => Method::Extension(other),
             };
 
             let wire = build_message(class, input_method, &txn_id, &[]);

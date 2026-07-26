@@ -27,8 +27,14 @@ fn encode_class_and_method(class: MessageClass, method: Method) -> u16 {
     };
 
     let method_bits: u16 = match method {
-        Method::Binding        => 0x001,
-        Method::Extension(m)   => m,
+        Method::Binding          => 0x001,
+        Method::Allocate         => 0x003,
+        Method::Refresh          => 0x004,
+        Method::Send             => 0x006,
+        Method::Data             => 0x007,
+        Method::CreatePermission => 0x008,
+        Method::ChannelBind      => 0x009,
+        Method::Extension(m)     => m,
     };
 
     // Inverse of decode's three extraction steps, applied in reverse:
@@ -46,6 +52,28 @@ fn encode_class_and_method(class: MessageClass, method: Method) -> u16 {
     m_high | c1_bit | m_mid | c0_bit | m_low
 }
 
+/// Build just the 20-byte STUN header, with an explicitly given length
+/// field rather than one derived from an attributes slice.
+///
+/// Used by `turn::auth` to construct the "adjusted length" prefix needed
+/// for MESSAGE-INTEGRITY computation (RFC 5389 §15.4), where the header
+/// must describe a length that includes an attribute (MESSAGE-INTEGRITY
+/// itself) not yet appended to the bytes being hashed.
+pub fn build_header_with_length(
+    class: MessageClass,
+    method: Method,
+    transaction_id: &[u8; 12],
+    length: u16,
+) -> Vec<u8> {
+    let msg_type = encode_class_and_method(class, method);
+    let mut out = Vec::with_capacity(20);
+    out.extend_from_slice(&msg_type.to_be_bytes());
+    out.extend_from_slice(&length.to_be_bytes());
+    out.extend_from_slice(&MAGIC_COOKIE.to_be_bytes());
+    out.extend_from_slice(transaction_id);
+    out
+}
+
 /// Build a complete, wire-ready STUN message: 20-byte header + attributes.
 ///
 /// `attributes` must already be TLV-encoded and padded (see
@@ -57,12 +85,7 @@ pub fn build_message(
     transaction_id: &[u8; 12],
     attributes: &[u8],
 ) -> Vec<u8> {
-    let msg_type = encode_class_and_method(class, method);
-    let mut out = Vec::with_capacity(20 + attributes.len());
-    out.extend_from_slice(&msg_type.to_be_bytes());
-    out.extend_from_slice(&(attributes.len() as u16).to_be_bytes());
-    out.extend_from_slice(&MAGIC_COOKIE.to_be_bytes());
-    out.extend_from_slice(transaction_id);
+    let mut out = build_header_with_length(class, method, transaction_id, attributes.len() as u16);
     out.extend_from_slice(attributes);
     out
 }
@@ -97,4 +120,69 @@ pub fn build_binding_success_response(
     let xma_value = encode_xor_mapped_address(&observed_addr, transaction_id);
     let attr = build_attribute(ATTR_XOR_MAPPED_ADDRESS, &xma_value);
     build_message(MessageClass::SuccessResponse, Method::Binding, transaction_id, &attr)
+}
+
+// ─── ERROR-CODE (RFC 5389 §15.6) and error responses ────────────────
+
+/// Encode an ERROR-CODE attribute value (without the 4-byte TLV header —
+/// [`build_attribute`] adds that).
+///
+/// Format: 2 reserved bytes (must be zero) + 1 byte class (low 3 bits,
+/// e.g. 4 for a 4xx code) + 1 byte number (0-99) + UTF-8 reason phrase.
+/// This is the exact inverse of `attributes::decode_error_code` — a code
+/// of 401 becomes class=4, number=1, matching what that decoder expects
+/// back (`code = class * 100 + number`).
+pub fn encode_error_code(code: u16, reason: &str) -> Vec<u8> {
+    let class  = (code / 100) as u8;
+    let number = (code % 100) as u8;
+    let mut value = vec![0u8, 0u8, class & 0x07, number];
+    value.extend_from_slice(reason.as_bytes());
+    value
+}
+
+/// Build a complete STUN error response: header (ErrorResponse class) +
+/// ERROR-CODE attribute + any additional caller-supplied attributes
+/// (already TLV-encoded, e.g. REALM/NONCE for a 401 challenge).
+pub fn build_error_response(
+    method: Method,
+    transaction_id: &[u8; 12],
+    code: u16,
+    reason: &str,
+    extra_attrs: &[u8],
+) -> Vec<u8> {
+    let error_attr = build_attribute(super::attributes::ATTR_ERROR_CODE, &encode_error_code(code, reason));
+    let mut attrs = error_attr;
+    attrs.extend_from_slice(extra_attrs);
+    build_message(MessageClass::ErrorResponse, method, transaction_id, &attrs)
+}
+
+/// Build a 401 Unauthorized challenge: ERROR-CODE(401) + REALM + NONCE.
+///
+/// RFC 5389 §10.2.2 / RFC 5766 §9: this is how a server tells a client
+/// "authenticate with these credentials against this realm, using this
+/// nonce" — the client is expected to resend the same request with
+/// USERNAME + the echoed REALM + the echoed NONCE + a computed
+/// MESSAGE-INTEGRITY attribute added.
+pub fn build_401_challenge(method: Method, transaction_id: &[u8; 12], realm: &str, nonce: &str) -> Vec<u8> {
+    let realm_attr = build_attribute(super::attributes::ATTR_REALM, realm.as_bytes());
+    let nonce_attr = build_attribute(super::attributes::ATTR_NONCE, nonce.as_bytes());
+    let mut extra = realm_attr;
+    extra.extend_from_slice(&nonce_attr);
+    build_error_response(method, transaction_id, 401, "Unauthorized", &extra)
+}
+
+/// Build a 438 Stale Nonce response: ERROR-CODE(438) + REALM + a fresh
+/// NONCE. RFC 5766 §9: sent when a request's NONCE was once valid but
+/// has since expired — distinct from 401, which is for missing or
+/// incorrect credentials entirely.
+///
+/// The specific code 438 is, like the TURN method numbers, a recalled
+/// registry value rather than something derivable — flagged for the same
+/// reason.
+pub fn build_438_stale_nonce(method: Method, transaction_id: &[u8; 12], realm: &str, fresh_nonce: &str) -> Vec<u8> {
+    let realm_attr = build_attribute(super::attributes::ATTR_REALM, realm.as_bytes());
+    let nonce_attr = build_attribute(super::attributes::ATTR_NONCE, fresh_nonce.as_bytes());
+    let mut extra = realm_attr;
+    extra.extend_from_slice(&nonce_attr);
+    build_error_response(method, transaction_id, 438, "Stale Nonce", &extra)
 }

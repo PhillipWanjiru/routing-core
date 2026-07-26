@@ -17,6 +17,7 @@
 //!   (separate terminal) tcpdump -i lo -w phase4_stun.pcap 'udp port 3478'
 
 pub mod stun;
+pub mod turn;
 
 use stun::{
     attributes::{decode_attributes, Attribute},
@@ -160,8 +161,204 @@ async fn main() {
 
     server_task.abort();
     tracing::info!("--------------------------------------------------------------");
-    tracing::info!("nat-traversal Phase 4: STUN server milestone COMPLETE");
+    tracing::info!("STUN Binding milestone COMPLETE — starting TURN Allocate auth demo");
+    tracing::info!("--------------------------------------------------------------");
+
+    run_turn_auth_demo().await;
+
+    tracing::info!("--------------------------------------------------------------");
+    tracing::info!("nat-traversal Phase 4: STUN server + TURN auth milestones COMPLETE");
     std::process::exit(0);
+}
+
+/// Demonstrates the full TURN long-term credential challenge-response
+/// cycle over real sockets:
+///   1. Unauthenticated Allocate -> server responds 401 with REALM+NONCE
+///   2. Client resends with correct credentials -> Success (placeholder)
+///   3. A separate attempt with WRONG credentials -> rejected with a
+///      fresh 401, not silently accepted
+async fn run_turn_auth_demo() {
+    use turn::{authenticate_request, build_authenticated_request, handle_allocate_datagram};
+    use turn::{AuthResult, CredentialAttempt, CredentialStore};
+
+    const TURN_SERVER_ADDR: &str = "127.0.0.1:3479";
+    const TURN_CLIENT_ADDR: &str = "127.0.0.1:0";
+    const REALM: &str = "routing-core.local";
+    const USERNAME: &str = "alice";
+    const CORRECT_PASSWORD: &str = "correcthorsebatterystaple";
+    const WRONG_PASSWORD: &str = "definitely-not-the-password";
+
+    let mut credentials = CredentialStore::new();
+    credentials.add_user(USERNAME, CORRECT_PASSWORD);
+
+    let server_socket = UdpSocket::bind(TURN_SERVER_ADDR).await.expect("bind TURN server 3479");
+    let client_socket  = UdpSocket::bind(TURN_CLIENT_ADDR).await.expect("bind TURN client ephemeral");
+
+    let server_task = tokio::spawn(async move {
+        let mut buf = vec![0u8; 2048];
+        loop {
+            let (n, peer) = match server_socket.recv_from(&mut buf).await {
+                Ok(v) => v,
+                Err(_) => break,
+            };
+            if let Some(resp) = handle_allocate_datagram(&buf[..n], peer, REALM, &credentials, 3600) {
+                let _ = server_socket.send_to(&resp, peer).await;
+            }
+        }
+    });
+
+    sleep(Duration::from_millis(50)).await;
+
+    // ── Step 1: unauthenticated Allocate -> expect 401 with REALM+NONCE ──
+    let txn_id_1 = gen_transaction_id();
+    let bare_request = build_message(MessageClass::Request, Method::Allocate, &txn_id_1, &[]);
+    client_socket.send_to(&bare_request, TURN_SERVER_ADDR).await.expect("send bare Allocate");
+    tracing::info!("Client → Allocate (no credentials)");
+
+    let mut buf = vec![0u8; 2048];
+    let (n, _) = client_socket.recv_from(&mut buf).await.expect("recv 401 challenge");
+    let challenge = parse_message(&buf[..n]).expect("401 response must parse");
+    let challenge_attrs = decode_attributes(&challenge.attributes_raw, &challenge.transaction_id);
+
+    let realm_from_server = challenge_attrs.iter().find_map(|a| match a {
+        Attribute::Realm(r) => Some(r.clone()),
+        _ => None,
+    });
+    let nonce_from_server = challenge_attrs.iter().find_map(|a| match a {
+        Attribute::Nonce(n) => Some(n.clone()),
+        _ => None,
+    });
+    let error_code = challenge_attrs.iter().find_map(|a| match a {
+        Attribute::ErrorCode { code, .. } => Some(*code),
+        _ => None,
+    });
+
+    tracing::info!(
+        "Client ← class={:?} error_code={:?} realm={:?} nonce={:?}",
+        challenge.class, error_code, realm_from_server, nonce_from_server
+    );
+
+    let step1_ok = challenge.class == MessageClass::ErrorResponse
+        && error_code == Some(401)
+        && realm_from_server.as_deref() == Some(REALM);
+
+    if step1_ok {
+        tracing::info!("Step 1 PASS — unauthenticated request correctly challenged with 401");
+    } else {
+        tracing::warn!("Step 1 FAIL — expected 401/REALM, got class={:?} code={:?}", challenge.class, error_code);
+    }
+
+    let (Some(realm), Some(nonce)) = (realm_from_server, nonce_from_server) else {
+        tracing::warn!("Cannot continue demo without REALM+NONCE from server");
+        server_task.abort();
+        return;
+    };
+
+    // ── Step 2: resend with CORRECT credentials -> expect Success ──────
+    let txn_id_2 = gen_transaction_id();
+    let authed_request = build_authenticated_request(
+        Method::Allocate, &txn_id_2, USERNAME, &realm, &nonce, CORRECT_PASSWORD,
+    );
+    client_socket.send_to(&authed_request, TURN_SERVER_ADDR).await.expect("send authenticated Allocate");
+    tracing::info!("Client → Allocate (USERNAME={USERNAME}, correct password, MESSAGE-INTEGRITY attached)");
+
+    let (n, _) = client_socket.recv_from(&mut buf).await.expect("recv auth response");
+    let auth_response = parse_message(&buf[..n]).expect("auth response must parse");
+    tracing::info!("Client ← class={:?} method={:?}", auth_response.class, auth_response.method);
+
+    let step2_ok = auth_response.class == MessageClass::SuccessResponse
+        && auth_response.method == Method::Allocate
+        && auth_response.transaction_id == txn_id_2;
+
+    if step2_ok {
+        tracing::info!("Step 2 PASS — correct credentials authenticated successfully");
+    } else {
+        tracing::warn!("Step 2 FAIL — expected SuccessResponse/Allocate, got {:?}/{:?}", auth_response.class, auth_response.method);
+    }
+
+    // ── Step 3: resend with WRONG credentials -> expect a fresh 401, not success ──
+    let txn_id_3 = gen_transaction_id();
+    let wrong_request = build_authenticated_request(
+        Method::Allocate, &txn_id_3, USERNAME, &realm, &nonce, WRONG_PASSWORD,
+    );
+    client_socket.send_to(&wrong_request, TURN_SERVER_ADDR).await.expect("send wrong-credential Allocate");
+    tracing::info!("Client → Allocate (USERNAME={USERNAME}, WRONG password)");
+
+    let (n, _) = client_socket.recv_from(&mut buf).await.expect("recv rejection response");
+    let reject_response = parse_message(&buf[..n]).expect("rejection response must parse");
+    let reject_attrs = decode_attributes(&reject_response.attributes_raw, &reject_response.transaction_id);
+    let reject_code = reject_attrs.iter().find_map(|a| match a {
+        Attribute::ErrorCode { code, .. } => Some(*code),
+        _ => None,
+    });
+
+    tracing::info!("Client ← class={:?} error_code={:?}", reject_response.class, reject_code);
+
+    let step3_ok = reject_response.class == MessageClass::ErrorResponse && reject_code == Some(401);
+
+    if step3_ok {
+        tracing::info!("Step 3 PASS — wrong credentials correctly rejected (not silently accepted)");
+    } else {
+        tracing::warn!("Step 3 FAIL — wrong credentials were NOT rejected as expected");
+    }
+
+    server_task.abort();
+
+    // ── Also verify authenticate_request directly, independent of the
+    // socket round trip, using the same locally-known-good message —
+    // belt-and-suspenders check that the gate itself (not just the
+    // demo's happy path) behaves correctly. ──
+    let mut store2 = CredentialStore::new();
+    store2.add_user(USERNAME, CORRECT_PASSWORD);
+    let direct_check = authenticate_request(
+        &CredentialAttempt {
+            username: Some(USERNAME),
+            realm: Some(&realm),
+            nonce: Some(&nonce),
+            mi_value_offset: find_mi_offset_for_demo(&authed_request),
+        },
+        &authed_request,
+        &realm,
+        &store2,
+        3600,
+    );
+    let direct_ok = matches!(direct_check, AuthResult::Authenticated { .. });
+
+    tracing::info!(
+        "--------------------------------------------------------------"
+    );
+    if step1_ok && step2_ok && step3_ok && direct_ok {
+        tracing::info!("TURN AUTH DEMO RESULT: PASS — full challenge-response cycle verified over real sockets");
+    } else {
+        tracing::warn!(
+            "TURN AUTH DEMO RESULT: FAIL — step1={step1_ok} step2={step2_ok} step3={step3_ok} direct={direct_ok}"
+        );
+    }
+}
+
+/// Small helper for the demo's belt-and-suspenders direct check: scans a
+/// message this same process just built for the MESSAGE-INTEGRITY
+/// attribute's value offset, mirroring what a real server would do by
+/// scanning received bytes. Not part of the public API — this is demo
+/// plumbing, not production logic (the real version lives in
+/// `turn::server::find_message_integrity_value_offset`, private to that
+/// module).
+fn find_mi_offset_for_demo(message: &[u8]) -> Option<usize> {
+    const ATTR_MESSAGE_INTEGRITY: u16 = 0x0008;
+    let attrs_start = 20; // stun::parser::HEADER_LEN
+    let mut offset = attrs_start;
+    while offset + 4 <= message.len() {
+        let attr_type = u16::from_be_bytes([message[offset], message[offset + 1]]);
+        let attr_len  = u16::from_be_bytes([message[offset + 2], message[offset + 3]]) as usize;
+        let value_start = offset + 4;
+        if attr_type == ATTR_MESSAGE_INTEGRITY {
+            return Some(value_start);
+        }
+        if value_start + attr_len > message.len() { break; }
+        let padded_len = (attr_len + 3) & !3;
+        offset = value_start + padded_len;
+    }
+    None
 }
 
 fn hex(bytes: &[u8]) -> String {

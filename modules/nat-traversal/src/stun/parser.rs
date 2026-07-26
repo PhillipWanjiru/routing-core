@@ -90,12 +90,31 @@ impl fmt::Display for MessageClass {
     }
 }
 
-/// Known STUN methods. Binding (0x0001) is the only method this Phase 4
-/// milestone implements; TURN adds Allocate/Refresh/etc. as an extension
-/// (RFC 5766 §13), represented here as `Extension` until that module lands.
+/// Known STUN/TURN methods.
+///
+/// Binding (0x001, RFC 5389) is the STUN-proper method verified against
+/// this project's own algebraic derivation of the class/method bit
+/// layout — see `encode_decode_round_trip_exhaustive` in
+/// `tests/stun_server_test.rs`, which checks the *bit layout* itself
+/// across all 16,384 possible 14-bit values.
+///
+/// The TURN methods below (RFC 5766 §13) are different in kind: their
+/// numeric values are arbitrary IANA registry assignments, not something
+/// derivable by computation the way the bit layout is. These specific
+/// numbers (Allocate=0x003, Refresh=0x004, Send=0x006, Data=0x007,
+/// CreatePermission=0x008, ChannelBind=0x009) are asserted from recalled
+/// protocol knowledge, not independently verified against RFC 5766's
+/// text or a real TURN server. Confirm against the RFC before pointing
+/// this code at a real-world TURN client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Method {
     Binding,
+    Allocate,
+    Refresh,
+    Send,
+    Data,
+    CreatePermission,
+    ChannelBind,
     Extension(u16),
 }
 
@@ -240,8 +259,18 @@ fn decode_class_and_method(msg_type: u16) -> (MessageClass, Method) {
     let m_high  = (msg_type & 0x3E00) >> 2; // bits 9-13, shifted down past removed bit 8
     let method_bits = m_high | m_mid | m_low;
 
+    // Method-bit values below are RFC 5766 §13 registry assignments
+    // (recalled, not independently derivable — see the Method enum's
+    // doc comment). Binding=0x001 is the one value this project has
+    // verified through its own bit-layout derivation.
     let method = match method_bits {
         0x001 => Method::Binding,
+        0x003 => Method::Allocate,
+        0x004 => Method::Refresh,
+        0x006 => Method::Send,
+        0x007 => Method::Data,
+        0x008 => Method::CreatePermission,
+        0x009 => Method::ChannelBind,
         other => Method::Extension(other),
     };
 
