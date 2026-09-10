@@ -22,6 +22,13 @@ pub const ATTR_XOR_MAPPED_ADDRESS: u16 = 0x0020;
 pub const ATTR_SOFTWARE:           u16 = 0x8022;
 pub const ATTR_FINGERPRINT:        u16 = 0x8028;
 
+// RFC 5766 §14 (TURN) attribute types. Like the TURN method and error
+// code numbers elsewhere in this project, these are IANA registry
+// assignments recalled from training data, not independently derivable —
+// confirm against RFC 5766's text before real-world interop.
+pub const ATTR_LIFETIME:            u16 = 0x000D;
+pub const ATTR_XOR_RELAYED_ADDRESS: u16 = 0x0016;
+
 /// STUN address family values (RFC 5389 §15.1).
 const FAMILY_IPV4: u8 = 0x01;
 const FAMILY_IPV6: u8 = 0x02;
@@ -42,6 +49,8 @@ pub enum Attribute {
     Nonce(String),
     Software(String),
     ErrorCode { code: u16, reason: String },
+    XorRelayedAddress(SocketAddrAttr),
+    Lifetime(u32),
     Unknown { attr_type: u16, value: Vec<u8> },
 }
 
@@ -125,8 +134,14 @@ fn decode_one(attr_type: u16, value: &[u8], transaction_id: &[u8; 12]) -> Option
         ATTR_XOR_MAPPED_ADDRESS => {
             decode_xor_mapped_address(value, transaction_id).ok().map(Attribute::XorMappedAddress)
         }
+        ATTR_XOR_RELAYED_ADDRESS => {
+            decode_xor_mapped_address(value, transaction_id).ok().map(Attribute::XorRelayedAddress)
+        }
         ATTR_MAPPED_ADDRESS => {
             decode_mapped_address(value).ok().map(Attribute::MappedAddress)
+        }
+        ATTR_LIFETIME => {
+            decode_lifetime(value).ok().map(Attribute::Lifetime)
         }
         ATTR_USERNAME => decode_utf8(value).ok().map(Attribute::Username),
         ATTR_REALM    => decode_utf8(value).ok().map(Attribute::Realm),
@@ -135,6 +150,13 @@ fn decode_one(attr_type: u16, value: &[u8], transaction_id: &[u8; 12]) -> Option
         ATTR_ERROR_CODE => decode_error_code(value).ok(),
         _ => Some(Attribute::Unknown { attr_type, value: value.to_vec() }),
     }
+}
+
+fn decode_lifetime(value: &[u8]) -> Result<u32, AttributeError> {
+    if value.len() < 4 {
+        return Err(AttributeError::Truncated);
+    }
+    Ok(u32::from_be_bytes([value[0], value[1], value[2], value[3]]))
 }
 
 fn decode_utf8(value: &[u8]) -> Result<String, AttributeError> {

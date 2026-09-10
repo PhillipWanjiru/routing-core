@@ -186,3 +186,26 @@ pub fn build_438_stale_nonce(method: Method, transaction_id: &[u8; 12], realm: &
     extra.extend_from_slice(&nonce_attr);
     build_error_response(method, transaction_id, 438, "Stale Nonce", &extra)
 }
+
+pub fn encode_lifetime(seconds: u32) -> Vec<u8> {
+    seconds.to_be_bytes().to_vec()
+}
+
+pub fn build_allocate_success_response(
+    transaction_id: &[u8; 12],
+    relayed_addr: SocketAddrAttr,
+    lifetime_secs: u32,
+) -> Vec<u8> {
+    let relayed_value = encode_xor_mapped_address(&relayed_addr, transaction_id);
+    let relayed_attr  = build_attribute(super::attributes::ATTR_XOR_RELAYED_ADDRESS, &relayed_value);
+    let lifetime_attr = build_attribute(super::attributes::ATTR_LIFETIME, &encode_lifetime(lifetime_secs));
+
+    let mut attrs = relayed_attr;
+    attrs.extend_from_slice(&lifetime_attr);
+    build_message(MessageClass::SuccessResponse, Method::Allocate, transaction_id, &attrs)
+}
+
+pub fn build_refresh_success_response(transaction_id: &[u8; 12], lifetime_secs: u32) -> Vec<u8> {
+    let lifetime_attr = build_attribute(super::attributes::ATTR_LIFETIME, &encode_lifetime(lifetime_secs));
+    build_message(MessageClass::SuccessResponse, Method::Refresh, transaction_id, &lifetime_attr)
+}

@@ -191,6 +191,8 @@ async fn run_turn_auth_demo() {
     let mut credentials = CredentialStore::new();
     credentials.add_user(USERNAME, CORRECT_PASSWORD);
 
+    let mut allocations = turn::AllocationTable::new(turn::PortPool::default_range());
+
     let server_socket = UdpSocket::bind(TURN_SERVER_ADDR).await.expect("bind TURN server 3479");
     let client_socket  = UdpSocket::bind(TURN_CLIENT_ADDR).await.expect("bind TURN client ephemeral");
 
@@ -201,7 +203,7 @@ async fn run_turn_auth_demo() {
                 Ok(v) => v,
                 Err(_) => break,
             };
-            if let Some(resp) = handle_allocate_datagram(&buf[..n], peer, REALM, &credentials, 3600) {
+            if let Some(resp) = handle_allocate_datagram(&buf[..n], peer, REALM, &credentials, &mut allocations, 3600) {
                 let _ = server_socket.send_to(&resp, peer).await;
             }
         }
@@ -266,14 +268,35 @@ async fn run_turn_auth_demo() {
     let auth_response = parse_message(&buf[..n]).expect("auth response must parse");
     tracing::info!("Client ← class={:?} method={:?}", auth_response.class, auth_response.method);
 
+    let auth_attrs = decode_attributes(&auth_response.attributes_raw, &auth_response.transaction_id);
+    let relayed_addr = auth_attrs.iter().find_map(|a| match a {
+        Attribute::XorRelayedAddress(addr) => Some(*addr),
+        _ => None,
+    });
+    let granted_lifetime = auth_attrs.iter().find_map(|a| match a {
+        Attribute::Lifetime(secs) => Some(*secs),
+        _ => None,
+    });
+
+    if let (Some(addr), Some(lifetime)) = (relayed_addr, granted_lifetime) {
+        tracing::info!("Client ← relay port allocated: {addr}, lifetime={lifetime}s");
+    } else {
+        tracing::warn!("Client ← Success Response missing XOR-RELAYED-ADDRESS or LIFETIME");
+    }
+
     let step2_ok = auth_response.class == MessageClass::SuccessResponse
         && auth_response.method == Method::Allocate
-        && auth_response.transaction_id == txn_id_2;
+        && auth_response.transaction_id == txn_id_2
+        && relayed_addr.is_some()
+        && granted_lifetime.is_some();
 
     if step2_ok {
-        tracing::info!("Step 2 PASS — correct credentials authenticated successfully");
+        tracing::info!(
+            "Step 2 PASS — correct credentials authenticated, real relay port {} granted for {}s",
+            relayed_addr.unwrap(), granted_lifetime.unwrap()
+        );
     } else {
-        tracing::warn!("Step 2 FAIL — expected SuccessResponse/Allocate, got {:?}/{:?}", auth_response.class, auth_response.method);
+        tracing::warn!("Step 2 FAIL — expected SuccessResponse/Allocate with a real relay allocation, got {:?}/{:?}", auth_response.class, auth_response.method);
     }
 
     // ── Step 3: resend with WRONG credentials -> expect a fresh 401, not success ──
