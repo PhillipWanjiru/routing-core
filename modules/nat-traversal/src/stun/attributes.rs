@@ -27,6 +27,7 @@ pub const ATTR_FINGERPRINT:        u16 = 0x8028;
 // assignments recalled from training data, not independently derivable —
 // confirm against RFC 5766's text before real-world interop.
 pub const ATTR_LIFETIME:            u16 = 0x000D;
+pub const ATTR_XOR_PEER_ADDRESS:    u16 = 0x0012;
 pub const ATTR_XOR_RELAYED_ADDRESS: u16 = 0x0016;
 
 /// STUN address family values (RFC 5389 §15.1).
@@ -50,6 +51,14 @@ pub enum Attribute {
     Software(String),
     ErrorCode { code: u16, reason: String },
     XorRelayedAddress(SocketAddrAttr),
+    /// RFC 5766 §14.3. Same wire format as XOR-MAPPED-ADDRESS again,
+    /// different meaning once more: "here is a peer address I want to
+    /// permit" (CreatePermission), or "here is the peer this Send/Data
+    /// indication concerns" (once the relay data path exists). The port
+    /// half is decoded for wire-format completeness, but permission
+    /// checks deliberately use only the IP, per RFC 5766 §8's IP-only
+    /// permission model.
+    XorPeerAddress(SocketAddrAttr),
     Lifetime(u32),
     Unknown { attr_type: u16, value: Vec<u8> },
 }
@@ -136,6 +145,10 @@ fn decode_one(attr_type: u16, value: &[u8], transaction_id: &[u8; 12]) -> Option
         }
         ATTR_XOR_RELAYED_ADDRESS => {
             decode_xor_mapped_address(value, transaction_id).ok().map(Attribute::XorRelayedAddress)
+        }
+        ATTR_XOR_PEER_ADDRESS => {
+            // Same reuse pattern again (RFC 5766 §14.3).
+            decode_xor_mapped_address(value, transaction_id).ok().map(Attribute::XorPeerAddress)
         }
         ATTR_MAPPED_ADDRESS => {
             decode_mapped_address(value).ok().map(Attribute::MappedAddress)

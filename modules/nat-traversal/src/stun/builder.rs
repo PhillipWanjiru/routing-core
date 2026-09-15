@@ -209,3 +209,21 @@ pub fn build_refresh_success_response(transaction_id: &[u8; 12], lifetime_secs: 
     let lifetime_attr = build_attribute(super::attributes::ATTR_LIFETIME, &encode_lifetime(lifetime_secs));
     build_message(MessageClass::SuccessResponse, Method::Refresh, transaction_id, &lifetime_attr)
 }
+
+// ─── TURN CreatePermission responses ────────────────────────────
+
+/// Build a CreatePermission Success Response. RFC 5766 §9 requires no
+/// attributes in the success case — the response's class, method, and
+/// echoed transaction ID are the entire confirmation.
+pub fn build_create_permission_success_response(transaction_id: &[u8; 12]) -> Vec<u8> {
+    build_message(MessageClass::SuccessResponse, Method::CreatePermission, transaction_id, &[])
+}
+
+/// Build a 437 Allocation Mismatch error — sent when a request arrives
+/// for a client that has no existing allocation (RFC 5766 §9). Like the
+/// other TURN numeric codes in this project, 437 is recalled from
+/// training data rather than independently derivable; confirm against
+/// RFC 5766 before real-world interop.
+pub fn build_437_allocation_mismatch(method: Method, transaction_id: &[u8; 12]) -> Vec<u8> {
+    build_error_response(method, transaction_id, 437, "Allocation Mismatch", &[])
+}
