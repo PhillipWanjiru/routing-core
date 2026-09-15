@@ -264,6 +264,20 @@ impl AllocationTable {
         self.allocations.get(client_addr)
     }
 
+    /// Iterate over every active allocation as `(client_addr, allocation)`.
+    ///
+    /// Added for the relay data path, which receives data on a relay
+    /// port and must resolve backwards to the owning client. The
+    /// internal `port_owner` reverse index would serve this directly and
+    /// in O(1), but is deliberately kept private — exposing it would
+    /// leak an implementation detail that callers could come to depend
+    /// on. If this linear scan ever shows up in profiling on the media
+    /// hot path, the right fix is a dedicated `client_for_relay_port`
+    /// method here, not widening access to the index.
+    pub fn iter(&self) -> impl Iterator<Item = (&SocketAddr, &Allocation)> {
+        self.allocations.iter()
+    }
+
     /// Release every allocation whose lifetime has elapsed as of `now`.
     /// Returns the client addresses that were swept, so a caller can log
     /// or otherwise react to them. Intended to be called periodically
