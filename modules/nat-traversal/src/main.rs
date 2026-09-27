@@ -16,6 +16,7 @@
 //!   cargo run -p nat-traversal
 //!   (separate terminal) tcpdump -i lo -w phase4_stun.pcap 'udp port 3478'
 
+pub mod ice;
 pub mod stun;
 pub mod turn;
 
