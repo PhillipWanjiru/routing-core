@@ -3,6 +3,9 @@
 pub mod attributes;
 pub mod builder;
 pub mod parser;
+pub mod fingerprint;
+pub mod integrity;
+pub mod scan;
 pub mod server;
 
 pub use attributes::{decode_attributes, Attribute, SocketAddrAttr};

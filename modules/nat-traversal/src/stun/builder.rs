@@ -227,3 +227,16 @@ pub fn build_create_permission_success_response(transaction_id: &[u8; 12]) -> Ve
 pub fn build_437_allocation_mismatch(method: Method, transaction_id: &[u8; 12]) -> Vec<u8> {
     build_error_response(method, transaction_id, 437, "Allocation Mismatch", &[])
 }
+
+// ─── ICE attribute value encoders (RFC 8445 §7.1) ───────────────
+
+/// PRIORITY attribute value: one big-endian u32.
+pub fn encode_priority(priority: u32) -> Vec<u8> {
+    priority.to_be_bytes().to_vec()
+}
+
+/// ICE-CONTROLLING / ICE-CONTROLLED attribute value: one big-endian u64
+/// tie-breaker.
+pub fn encode_tie_breaker(tie_breaker: u64) -> Vec<u8> {
+    tie_breaker.to_be_bytes().to_vec()
+}

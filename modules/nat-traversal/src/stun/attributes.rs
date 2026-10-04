@@ -30,6 +30,14 @@ pub const ATTR_LIFETIME:            u16 = 0x000D;
 pub const ATTR_XOR_PEER_ADDRESS:    u16 = 0x0012;
 pub const ATTR_XOR_RELAYED_ADDRESS: u16 = 0x0016;
 
+// RFC 8445 §16.1 (ICE) attribute types. Same caveat as every other registry
+// number in this project: recalled from training data, not independently
+// derivable. Confirm against the RFC text before real-world interop.
+pub const ATTR_PRIORITY:        u16 = 0x0024;
+pub const ATTR_USE_CANDIDATE:   u16 = 0x0025;
+pub const ATTR_ICE_CONTROLLED:  u16 = 0x8029;
+pub const ATTR_ICE_CONTROLLING: u16 = 0x802A;
+
 /// STUN address family values (RFC 5389 §15.1).
 const FAMILY_IPV4: u8 = 0x01;
 const FAMILY_IPV6: u8 = 0x02;
@@ -60,6 +68,18 @@ pub enum Attribute {
     /// permission model.
     XorPeerAddress(SocketAddrAttr),
     Lifetime(u32),
+    /// RFC 8445 §7.1.1: the priority the sender's candidate would have if it
+    /// turned out to be peer-reflexive.
+    Priority(u32),
+    /// RFC 8445 §7.1.2: zero-length flag; the controlling agent sets it to
+    /// nominate the pair this check is sent on.
+    UseCandidate,
+    /// RFC 8445 §7.1.3: sender is controlled; value is its 64-bit tie-breaker.
+    IceControlled(u64),
+    /// RFC 8445 §7.1.3: sender is controlling; value is its 64-bit tie-breaker.
+    IceControlling(u64),
+    /// RFC 5389 §15.5: CRC-32 XOR 0x5354554e of the message so far.
+    Fingerprint(u32),
     Unknown { attr_type: u16, value: Vec<u8> },
 }
 
@@ -156,6 +176,16 @@ fn decode_one(attr_type: u16, value: &[u8], transaction_id: &[u8; 12]) -> Option
         ATTR_LIFETIME => {
             decode_lifetime(value).ok().map(Attribute::Lifetime)
         }
+        // A known attribute with a wrong-sized value is dropped (None), the
+        // same policy as the existing address/lifetime decoders: a validator
+        // then sees the attribute as absent and rejects the message.
+        ATTR_PRIORITY => decode_u32_exact(value).map(Attribute::Priority),
+        ATTR_USE_CANDIDATE => {
+            if value.is_empty() { Some(Attribute::UseCandidate) } else { None }
+        }
+        ATTR_ICE_CONTROLLED  => decode_u64_exact(value).map(Attribute::IceControlled),
+        ATTR_ICE_CONTROLLING => decode_u64_exact(value).map(Attribute::IceControlling),
+        ATTR_FINGERPRINT     => decode_u32_exact(value).map(Attribute::Fingerprint),
         ATTR_USERNAME => decode_utf8(value).ok().map(Attribute::Username),
         ATTR_REALM    => decode_utf8(value).ok().map(Attribute::Realm),
         ATTR_NONCE    => decode_utf8(value).ok().map(Attribute::Nonce),
@@ -304,4 +334,22 @@ pub fn encode_xor_mapped_address(addr: &SocketAddrAttr, transaction_id: &[u8; 12
     }
 
     out
+}
+
+fn decode_u32_exact(value: &[u8]) -> Option<u32> {
+    if value.len() == 4 {
+        Some(u32::from_be_bytes([value[0], value[1], value[2], value[3]]))
+    } else {
+        None
+    }
+}
+
+fn decode_u64_exact(value: &[u8]) -> Option<u64> {
+    if value.len() == 8 {
+        let mut b = [0u8; 8];
+        b.copy_from_slice(value);
+        Some(u64::from_be_bytes(b))
+    } else {
+        None
+    }
 }
