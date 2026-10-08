@@ -133,9 +133,17 @@ impl Candidate {
     /// construction (they currently aren't, but computing fresh costs
     /// nothing and removes the possibility by construction).
     pub fn priority(&self) -> u32 {
-        let type_pref = self.candidate_type.type_preference();
-        let component_term = 256u32.saturating_sub(self.component_id as u32);
-        (1 << 24) * type_pref + (1 << 8) * (self.local_preference as u32) + component_term
+        compute_priority(self.candidate_type, self.local_preference, self.component_id)
+    }
+
+    /// RFC 8445 §7.1.1: the priority a check sent from this candidate
+    /// advertises in its PRIORITY attribute — what a *peer-reflexive*
+    /// candidate learned from that check would have. It takes the
+    /// peer-reflexive type preference but this candidate's own local
+    /// preference and component, so a NAT-discovered address inherits the
+    /// ranking of the interface it was discovered through.
+    pub fn peer_reflexive_priority(&self) -> u32 {
+        compute_priority(CandidateType::PeerReflexive, self.local_preference, self.component_id)
     }
 }
 
@@ -149,4 +157,11 @@ impl Candidate {
 /// which is the RFC-correct behaviour for pruning purposes.
 fn compute_foundation(candidate_type: CandidateType, base_addr: SocketAddr) -> String {
     format!("{:?}-{}", candidate_type, base_addr.ip())
+}
+
+/// The one place the RFC 8445 §5.1.2.1 formula lives, shared by `priority`
+/// and `peer_reflexive_priority` so the two can never drift apart.
+fn compute_priority(candidate_type: CandidateType, local_preference: u16, component_id: u8) -> u32 {
+    let component_term = 256u32.saturating_sub(component_id as u32);
+    (1 << 24) * candidate_type.type_preference() + (1 << 8) * (local_preference as u32) + component_term
 }

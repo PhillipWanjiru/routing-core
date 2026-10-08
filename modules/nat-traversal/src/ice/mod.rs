@@ -1,9 +1,12 @@
 //! ICE (RFC 8445) sub-modules.
 
+pub mod agent;
 pub mod candidate;
 pub mod check_msg;
+pub mod checklist;
 pub mod gather;
 pub mod pair;
+pub mod random;
 
 pub use candidate::{Candidate, CandidateType};
 pub use gather::{
@@ -16,3 +19,7 @@ pub use check_msg::{
     parse_check_request, parse_check_response, CheckRequestError, CheckRequestParams,
     CheckResponse, CheckResponseError, ParsedCheckRequest,
 };
+pub use agent::{
+    random_tie_breaker, ChecklistState, IceAction, IceAgent, IceConfig, IceCredentials, ValidPair,
+};
+pub use checklist::{CheckList, CheckListEntry, PairState};

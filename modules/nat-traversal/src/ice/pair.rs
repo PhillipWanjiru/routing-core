@@ -87,10 +87,22 @@ impl CandidatePair {
         (1u64 << 32) * lo + 2 * hi + tie_bit
     }
 
-    fn new(local: Candidate, remote: Candidate, role: IceRole) -> Self {
+    /// Form one pair, computing its priority for `role`. Public because the
+    /// connectivity-check agent forms *valid* pairs itself once a check
+    /// reveals a peer-reflexive local candidate — a pair that was never in the
+    /// original candidate cross-product.
+    pub fn new(local: Candidate, remote: Candidate, role: IceRole) -> Self {
         let priority = Self::compute_priority(&local, &remote, role);
         let foundation = format!("{}:{}", local.foundation, remote.foundation);
         CandidatePair { local, remote, priority, foundation }
+    }
+
+    /// Recompute this pair's priority for `role`. Pair priority depends on
+    /// which side is controlling (G vs D in the formula), so when an agent's
+    /// role flips after a role conflict, every pair it holds must be
+    /// re-prioritised or the check list would be ordered by a stale role.
+    pub fn recompute_priority(&mut self, role: IceRole) {
+        self.priority = Self::compute_priority(&self.local, &self.remote, role);
     }
 }
 
