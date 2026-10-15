@@ -102,6 +102,13 @@ pub struct Candidate {
     /// exists so the type is RFC-complete rather than assuming that
     /// will always remain true.
     pub component_id: u8,
+    /// Set only for a *remote peer-reflexive* candidate learned from an
+    /// incoming check (RFC 8445 §7.3.1.3). Its priority is whatever the
+    /// peer's PRIORITY attribute said, and that exact value must be kept: it
+    /// cannot be reconstructed from a type and a local preference, because a
+    /// peer is free to advertise any 32-bit value. `None` for every candidate
+    /// built through `Candidate::new`.
+    pub priority_override: Option<u32>,
 }
 
 impl Candidate {
@@ -124,7 +131,18 @@ impl Candidate {
             foundation,
             local_preference,
             component_id,
+            priority_override: None,
         }
+    }
+
+    /// A remote peer-reflexive candidate: an address the peer's check came
+    /// from that it never signalled to us (typically a symmetric NAT's
+    /// per-destination mapping). Its base is unknown, so it is its own base,
+    /// and its priority is the exact PRIORITY the check advertised.
+    pub fn remote_peer_reflexive(transport_addr: SocketAddr, priority: u32, component_id: u8) -> Self {
+        let mut c = Candidate::new(CandidateType::PeerReflexive, transport_addr, transport_addr, 0, component_id);
+        c.priority_override = Some(priority);
+        c
     }
 
     /// RFC 8445 §5.1.2.1 priority. Computed on demand rather than cached,
@@ -133,7 +151,8 @@ impl Candidate {
     /// construction (they currently aren't, but computing fresh costs
     /// nothing and removes the possibility by construction).
     pub fn priority(&self) -> u32 {
-        compute_priority(self.candidate_type, self.local_preference, self.component_id)
+        self.priority_override
+            .unwrap_or_else(|| compute_priority(self.candidate_type, self.local_preference, self.component_id))
     }
 
     /// RFC 8445 §7.1.1: the priority a check sent from this candidate

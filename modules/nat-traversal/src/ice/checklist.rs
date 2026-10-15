@@ -28,6 +28,7 @@
 
 use super::pair::{CandidatePair, IceRole};
 use std::collections::{HashMap, HashSet};
+use std::net::SocketAddr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PairState {
@@ -98,6 +99,31 @@ impl CheckList {
         }
 
         CheckList { entries }
+    }
+
+    /// Add a pair formed after construction — e.g. from a check that arrived
+    /// from a remote candidate we were never told about. The list stays
+    /// sorted; the sort is stable, so an equal-priority newcomer goes after
+    /// the existing ones. Returns the new entry's stable id (one past the
+    /// largest in use, so ids are never reused).
+    pub fn add_pair(&mut self, pair: CandidatePair, state: PairState) -> usize {
+        let id = self.entries.iter().map(|e| e.id).max().map_or(0, |m| m + 1);
+        self.entries.push(CheckListEntry { id, pair, state });
+        self.entries.sort_by(|a, b| b.pair.priority.cmp(&a.pair.priority));
+        id
+    }
+
+    /// The entry whose check leaves `local_base` for `remote` on `component`:
+    /// the same key pruning uses, so a pruned list holds at most one.
+    pub fn find_entry(&self, local_base: SocketAddr, remote: SocketAddr, component: u8) -> Option<usize> {
+        self.entries
+            .iter()
+            .find(|e| {
+                e.pair.local.base_addr == local_base
+                    && e.pair.remote.transport_addr == remote
+                    && e.pair.local.component_id == component
+            })
+            .map(|e| e.id)
     }
 
     pub fn entries(&self) -> &[CheckListEntry] {

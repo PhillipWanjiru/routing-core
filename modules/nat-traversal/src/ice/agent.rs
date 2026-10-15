@@ -22,12 +22,28 @@
 //!   **role-conflict (487)** handling, including the subtle case of several
 //!   checks in flight all being answered 487.
 //!
+//! # Responder side (RFC 8445 §7.3)
+//!
+//! Incoming check requests are validated by the codec whose tests proved it
+//! byte-exact, and then:
+//!
+//! * **Role conflicts** are resolved by tie-breaker, arranged so the larger
+//!   tie-breaker ends up controlling at both ends. The loser either switches
+//!   role or answers 487 (signed, so it cannot be forged).
+//! * **Triggered checks**: a valid request moves its pair to the front of the
+//!   queue so the reverse path is probed at once. This is what makes hole
+//!   punching work through address-restricted NATs: each side's first check
+//!   is dropped, but it opens the permission the other side's check needs.
+//! * **Remote peer-reflexive candidates**: a request from an address we were
+//!   never told about — a symmetric NAT's per-destination mapping — becomes a
+//!   new remote candidate with its own pair.
+//! * A request that fails authentication creates nothing: no pair, no
+//!   candidate, no triggered check.
+//!
 //! # Not implemented yet
 //!
-//! Incoming check *requests* (and therefore triggered checks from them,
-//! remote peer-reflexive candidates, and answering role conflicts), nomination
-//! and completion, relayed-candidate sending, keepalives, ICE restart.
-//! `handle_datagram` ignores requests for now; those arrive in the next slice.
+//! Nomination and completion (USE-CANDIDATE is parsed but not yet acted on),
+//! relayed-candidate sending, keepalives, ICE restart.
 //!
 //! # A response that fails validation is discarded, and the transaction runs on
 //!
@@ -38,7 +54,11 @@
 
 use super::{
     candidate::{Candidate, CandidateType},
-    check_msg::{build_check_request, parse_check_response, CheckRequestParams, CheckResponse},
+    check_msg::{
+        build_check_error_response, build_check_request, build_check_success_response,
+        parse_check_request, parse_check_response, CheckRequestError, CheckRequestParams,
+        CheckResponse,
+    },
     checklist::{CheckList, PairState},
     pair::{form_candidate_pairs, CandidatePair, IceRole},
     random::{random_bytes, random_u64},
@@ -125,6 +145,11 @@ struct Transaction {
     /// The role this request was sent under. A 487 only means "switch" if our
     /// role has not already changed since — see `on_role_conflict`.
     role: IceRole,
+    /// Set when a triggered check supersedes this transaction (RFC 8445
+    /// §7.3.1.4): it stops retransmitting and its timeout no longer counts as
+    /// a failure, but a *success* answering it is still honoured — the packet
+    /// may simply have been slow.
+    cancelled: bool,
 }
 
 pub struct IceAgent {
@@ -134,6 +159,12 @@ pub struct IceAgent {
     local: IceCredentials,
     remote: IceCredentials,
     local_candidates: Vec<Candidate>,
+    /// The peer's candidates, including peer-reflexive ones learned from
+    /// incoming checks.
+    remote_candidates: Vec<Candidate>,
+    /// Transaction IDs of requests already acted on, so a retransmitted
+    /// request is answered again but does not re-trigger a check each time.
+    seen_requests: VecDeque<[u8; 12]>,
     checklist: CheckList,
     valid: Vec<ValidPair>,
     transactions: Vec<Transaction>,
@@ -173,6 +204,8 @@ impl IceAgent {
             local,
             remote,
             local_candidates,
+            remote_candidates,
+            seen_requests: VecDeque::new(),
             checklist,
             valid: Vec::new(),
             transactions: Vec::new(),
@@ -202,6 +235,12 @@ impl IceAgent {
     /// The original local candidates plus any peer-reflexive ones learned.
     pub fn local_candidates(&self) -> &[Candidate] {
         &self.local_candidates
+    }
+
+    /// The peer's candidates as signalled, plus any peer-reflexive ones
+    /// learned from the source of an incoming check.
+    pub fn remote_candidates(&self) -> &[Candidate] {
+        &self.remote_candidates
     }
 
     /// Advance time: retransmit or expire transactions, and start the next
@@ -259,7 +298,7 @@ impl IceAgent {
             MessageClass::SuccessResponse | MessageClass::ErrorResponse => {
                 self.handle_response(from, to, raw, msg.transaction_id)
             }
-            // Incoming check requests are the next slice's work.
+            MessageClass::Request => self.handle_request(from, to, raw),
             _ => Vec::new(),
         }
     }
@@ -319,6 +358,7 @@ impl IceAgent {
             deadline,
             rto,
             role: self.role,
+            cancelled: false,
         });
         Some(IceAction::Send { from, to, data: request })
     }
@@ -338,6 +378,14 @@ impl IceAgent {
         let mut timed_out: Vec<usize> = Vec::new();
 
         for (i, t) in self.transactions.iter_mut().enumerate() {
+            // A superseded transaction stops retransmitting but is kept for
+            // one final wait, in case its answer is merely slow.
+            if t.cancelled {
+                t.next_send_at = None;
+                if t.deadline.is_none() {
+                    t.deadline = Some(now + t.rto.saturating_mul(final_mult));
+                }
+            }
             if t.deadline.is_some_and(|d| now >= d) {
                 timed_out.push(i);
                 continue;
@@ -358,7 +406,11 @@ impl IceAgent {
 
         for &i in timed_out.iter().rev() {
             let t = self.transactions.remove(i);
-            self.fail_entry(t.entry_id);
+            // A cancelled transaction timing out is not a failure: its pair has
+            // been re-queued and may already have a newer check in flight.
+            if !t.cancelled {
+                self.fail_entry(t.entry_id);
+            }
         }
     }
 
@@ -384,13 +436,15 @@ impl IceAgent {
         // RFC 8445 §7.2.5.2.1: the response must come back from the address we
         // sent to, to the address we sent from. Anything else is a failed check
         // (a NAT or attacker answering from somewhere unexpected).
-        let (sent_from, sent_to, entry_id, role_sent) = {
+        let (sent_from, sent_to, entry_id, role_sent, cancelled) = {
             let t = &self.transactions[idx];
-            (t.from, t.to, t.entry_id, t.role)
+            (t.from, t.to, t.entry_id, t.role, t.cancelled)
         };
         if from != sent_to || to != sent_from {
             self.transactions.remove(idx);
-            self.fail_entry(entry_id);
+            if !cancelled {
+                self.fail_entry(entry_id);
+            }
             self.refresh_state();
             return Vec::new();
         }
@@ -399,6 +453,11 @@ impl IceAgent {
             CheckResponse::Success { mapped } => {
                 let t = self.transactions.remove(idx);
                 self.on_success(t.entry_id, mapped);
+            }
+            // An error answering a superseded transaction is not acted on: the
+            // pair's current check will get its own answer.
+            _ if cancelled => {
+                self.transactions.remove(idx);
             }
             // Only an authenticated 487 may flip our role: an unauthenticated
             // one could be forged to make us flap. Ignored, the transaction
@@ -501,6 +560,171 @@ impl IceAgent {
             v.pair.recompute_priority(self.role);
         }
         self.valid.sort_by(|a, b| b.pair.priority.cmp(&a.pair.priority));
+    }
+
+    // ─── Incoming check requests (RFC 8445 §7.3) ─────────────────
+
+    fn handle_request(&mut self, from: SocketAddr, to: SocketAddr, raw: &[u8]) -> Vec<IceAction> {
+        let parsed = match parse_check_request(raw, &self.local.ufrag, self.local.password.as_bytes()) {
+            Ok(p) => p,
+            // We cannot verify the sender. Say so (401) and do nothing else:
+            // an unauthenticated request must never create a pair, a
+            // candidate or a triggered check, or anyone could steer our list.
+            Err(CheckRequestError::Unauthorized) => {
+                return self.reply_error(raw, to, from, 401, "Unauthorized", false);
+            }
+            // Authenticated but malformed, so the sender can trust the reply.
+            Err(CheckRequestError::BadRequest(_)) => {
+                return self.reply_error(raw, to, from, 400, "Bad Request", true);
+            }
+            // Not STUN-for-ICE at all: not ours to answer.
+            Err(_) => return Vec::new(),
+        };
+
+        // RFC 8445 §7.3.1.1 — both sides claim the same role. The two rules
+        // are mirror images, arranged so the *larger* tie-breaker ends up
+        // controlling at both ends: a controlling agent keeps its role only if
+        // its tie-breaker is >= the peer's; a controlled agent takes over only
+        // if its tie-breaker is >=. Otherwise the agent yields — by switching
+        // (controlling side) or by answering 487 (controlled side), and the
+        // peer, holding the larger value, switches or keeps its role to match.
+        // Equal tie-breakers make both sides flip forever; with 64 random bits
+        // that is a 2^-64 event, which is why the RFC tolerates it.
+        match (self.role, parsed.sender_role) {
+            (IceRole::Controlling, IceRole::Controlling) => {
+                if self.tie_breaker >= parsed.tie_breaker {
+                    return self.reply_error(raw, to, from, 487, "Role Conflict", true);
+                }
+                self.switch_role();
+            }
+            (IceRole::Controlled, IceRole::Controlled) => {
+                if self.tie_breaker >= parsed.tie_breaker {
+                    self.switch_role();
+                } else {
+                    return self.reply_error(raw, to, from, 487, "Role Conflict", true);
+                }
+            }
+            _ => {}
+        }
+
+        // The response goes back from the address the request arrived on, to
+        // the address it came from — and reports that source as the mapping.
+        let reply = IceAction::Send {
+            from: to,
+            to: from,
+            data: build_check_success_response(&parsed.txn_id, from, self.local.password.as_bytes()),
+        };
+        if self.note_request(parsed.txn_id) {
+            self.trigger_for_request(from, to, parsed.priority);
+        }
+        vec![reply]
+    }
+
+    /// An error response, signed only when the request itself authenticated
+    /// (an unsigned 401 is all we can honestly say to a stranger).
+    fn reply_error(
+        &self,
+        raw: &[u8],
+        local: SocketAddr,
+        peer: SocketAddr,
+        code: u16,
+        reason: &str,
+        sign: bool,
+    ) -> Vec<IceAction> {
+        let Ok(msg) = parse_message(raw) else {
+            return Vec::new();
+        };
+        let key = if sign { Some(self.local.password.as_bytes()) } else { None };
+        vec![IceAction::Send {
+            from: local,
+            to: peer,
+            data: build_check_error_response(&msg.transaction_id, code, reason, key),
+        }]
+    }
+
+    /// Remember a request's transaction ID. Returns `false` if it was already
+    /// acted on, i.e. this is a retransmission.
+    fn note_request(&mut self, txn_id: [u8; 12]) -> bool {
+        if self.seen_requests.contains(&txn_id) {
+            return false;
+        }
+        self.seen_requests.push_back(txn_id);
+        if self.seen_requests.len() > 128 {
+            self.seen_requests.pop_front();
+        }
+        true
+    }
+
+    /// The local candidate a datagram arrived on: the one whose transport
+    /// address is the destination, or failing that one sharing its base
+    /// (a server-reflexive candidate arrives at its host base).
+    fn local_candidate_for(&self, addr: SocketAddr) -> Option<Candidate> {
+        self.local_candidates
+            .iter()
+            .find(|c| c.transport_addr == addr)
+            .or_else(|| self.local_candidates.iter().find(|c| c.base_addr == addr))
+            .cloned()
+    }
+
+    /// RFC 8445 §7.3.1.3–4: work out the pair this request implies — learning
+    /// a remote peer-reflexive candidate if its source is new — and queue a
+    /// triggered check on it.
+    fn trigger_for_request(&mut self, from: SocketAddr, to: SocketAddr, priority: u32) {
+        let Some(local) = self.local_candidate_for(to) else {
+            return;
+        };
+        let component = local.component_id;
+
+        let remote = match self
+            .remote_candidates
+            .iter()
+            .find(|c| c.transport_addr == from && c.component_id == component)
+        {
+            Some(known) => known.clone(),
+            None => {
+                let learned = Candidate::remote_peer_reflexive(from, priority, component);
+                self.remote_candidates.push(learned.clone());
+                learned
+            }
+        };
+
+        let id = match self.checklist.find_entry(local.base_addr, remote.transport_addr, component) {
+            Some(id) => id,
+            None => {
+                let pair = CandidatePair::new(local, remote, self.role);
+                self.checklist.add_pair(pair, PairState::Waiting)
+            }
+        };
+        self.queue_triggered(id);
+    }
+
+    /// RFC 8445 §7.3.1.4, by the pair's current state: a Succeeded pair is
+    /// left alone; an In-Progress one has its transaction cancelled and is
+    /// re-checked; Frozen, Waiting and Failed ones are simply queued. A check
+    /// list that had Failed is revived — a peer that is actively checking us
+    /// proves connectivity is still possible.
+    fn queue_triggered(&mut self, id: usize) {
+        let Some(state) = self.checklist.entry(id).map(|e| e.state) else {
+            return;
+        };
+        match state {
+            PairState::Succeeded => return,
+            PairState::InProgress => {
+                for t in self.transactions.iter_mut().filter(|t| t.entry_id == id) {
+                    t.cancelled = true;
+                }
+            }
+            PairState::Frozen | PairState::Waiting | PairState::Failed => {}
+        }
+        if let Some(e) = self.checklist.entry_mut(id) {
+            e.state = PairState::Waiting;
+        }
+        if !self.triggered.contains(&id) {
+            self.triggered.push_back(id);
+        }
+        if self.state == ChecklistState::Failed {
+            self.state = ChecklistState::Running;
+        }
     }
 
     fn fail_entry(&mut self, entry_id: usize) {
