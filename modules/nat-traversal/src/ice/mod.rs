@@ -20,6 +20,7 @@ pub use check_msg::{
     CheckResponse, CheckResponseError, ParsedCheckRequest,
 };
 pub use agent::{
-    random_tie_breaker, ChecklistState, IceAction, IceAgent, IceConfig, IceCredentials, ValidPair,
+    random_tie_breaker, ChecklistState, IceAction, IceAgent, IceConfig, IceCredentials, Nomination,
+    ValidPair,
 };
 pub use checklist::{CheckList, CheckListEntry, PairState};

@@ -9,7 +9,7 @@
 use nat_traversal::ice::{
     build_check_error_response, build_check_success_response, parse_check_request, Candidate,
     CandidatePair, CandidateType, ChecklistState, IceAction, IceAgent, IceConfig, IceCredentials,
-    IceRole, PairState, ParsedCheckRequest,
+    IceRole, Nomination, PairState, ParsedCheckRequest,
 };
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -34,23 +34,30 @@ fn srflx(public: &str, base: &str, pref: u16) -> Candidate {
     Candidate::new(CandidateType::ServerReflexive, a(public), a(base), pref, 1)
 }
 fn cfg(ta: u64, rto: u64, rc: u32, rm: u32) -> IceConfig {
-    IceConfig { ta: ms(ta), min_rto: ms(rto), max_transmissions: rc, final_wait_multiplier: rm }
+    IceConfig {
+        ta: ms(ta), min_rto: ms(rto), max_transmissions: rc, final_wait_multiplier: rm,
+        nomination: Nomination::Never,
+    }
 }
 
 struct Rig {
     agent: IceAgent,
     t0: Instant,
+    /// The last time passed to `poll`, used as "now" for deliveries.
+    now_ms: u64,
 }
 impl Rig {
     fn at(&self, n: u64) -> Instant {
         self.t0 + ms(n)
     }
     fn poll(&mut self, n: u64) -> Vec<IceAction> {
+        self.now_ms = n;
         let t = self.at(n);
         self.agent.poll(t)
     }
     fn deliver(&mut self, from: &str, to: &str, raw: &[u8]) -> Vec<IceAction> {
-        self.agent.handle_datagram(a(from), a(to), raw)
+        let t = self.at(self.now_ms);
+        self.agent.handle_datagram(a(from), a(to), raw, t)
     }
 }
 
@@ -66,7 +73,7 @@ fn rig_with(local: Vec<Candidate>, remote: Vec<Candidate>, role: IceRole, config
         remote,
         t0,
     );
-    Rig { agent, t0 }
+    Rig { agent, t0, now_ms: 0 }
 }
 
 /// A one-pair rig with timers short enough to reason about: Ta 10, RTO 100.
