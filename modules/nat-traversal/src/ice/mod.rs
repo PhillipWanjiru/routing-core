@@ -4,6 +4,7 @@ pub mod agent;
 pub mod candidate;
 pub mod check_msg;
 pub mod checklist;
+pub mod driver;
 pub mod gather;
 pub mod pair;
 pub mod random;
@@ -24,3 +25,4 @@ pub use agent::{
     ValidPair,
 };
 pub use checklist::{CheckList, CheckListEntry, PairState};
+pub use driver::{run_agent, DriveOptions};
