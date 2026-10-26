@@ -16,8 +16,7 @@ use super::{
 use crate::stun::{
     attributes::{decode_attributes, Attribute},
     builder::{
-        build_401_challenge, build_438_stale_nonce, build_allocate_success_response,
-        build_error_response, build_refresh_success_response,
+        build_401_challenge, build_438_stale_nonce, build_error_response, build_refresh_success_response,
     },
     parser::{parse_message, MessageClass, Method, StunMessage},
 };
@@ -113,13 +112,21 @@ pub(super) fn challenge_response_for(result: &AuthResult, method: Method, transa
 /// carrying the real relay port via XOR-RELAYED-ADDRESS and the granted
 /// LIFETIME. On pool exhaustion: 508 Insufficient Capacity. On
 /// authentication failure: 401/438, same as before allocation existed.
+#[allow(clippy::too_many_arguments)]
 pub fn handle_allocate_datagram(
     raw: &[u8],
     peer: SocketAddr,
+    // The address relayed transport addresses are advertised on: the TURN
+    // *server's* address. An earlier version advertised the client's own IP —
+    // correct only on loopback, where the two coincide.
+    relay_ip: std::net::IpAddr,
     realm: &str,
     credentials: &CredentialStore,
     allocations: &mut AllocationTable,
     max_nonce_age_secs: u64,
+    // Injected rather than read from the system clock, so allocation lifetimes
+    // can be tested at controlled times.
+    now: Instant,
 ) -> Option<Vec<u8>> {
     let msg = parse_message(raw).ok()?;
     if msg.class != MessageClass::Request || msg.method != Method::Allocate {
@@ -128,21 +135,40 @@ pub fn handle_allocate_datagram(
 
     match authenticate_turn_request(&msg, raw, realm, credentials, max_nonce_age_secs) {
         AuthResult::Authenticated { username } => {
+            // RFC 5766 §6.2: REQUESTED-TRANSPORT is mandatory, and only UDP is
+            // supported here. Checked after authentication, as the RFC orders it.
+            let transport = decode_attributes(&msg.attributes_raw, &msg.transaction_id)
+                .into_iter()
+                .find_map(|a| if let Attribute::RequestedTransport(p) = a { Some(p) } else { None });
+            match transport {
+                None => {
+                    return Some(build_error_response(
+                        Method::Allocate, &msg.transaction_id, 400, "Bad Request", &[],
+                    ));
+                }
+                Some(crate::stun::builder::IP_PROTOCOL_UDP) => {}
+                Some(_) => {
+                    return Some(build_error_response(
+                        Method::Allocate, &msg.transaction_id, 442, "Unsupported Transport Protocol", &[],
+                    ));
+                }
+            }
+
             let requested_lifetime = extract_requested_lifetime(&msg);
 
-            match allocations.create_or_refresh(peer, requested_lifetime, Instant::now()) {
+            match allocations.create_or_refresh(peer, requested_lifetime, now) {
                 Ok(allocation) => {
                     tracing::info!(
                         username, relay_port = allocation.relay_port, lifetime = allocation.lifetime_secs,
                         "Allocate succeeded"
                     );
-                    let relayed_addr = crate::stun::SocketAddrAttr {
-                        ip:   peer.ip(),
-                        port: allocation.relay_port,
-                    };
-                    Some(build_allocate_success_response(
-                        &msg.transaction_id, relayed_addr, allocation.lifetime_secs,
-                    ))
+                    let relayed = crate::stun::SocketAddrAttr { ip: relay_ip, port: allocation.relay_port };
+                    let mapped = crate::stun::SocketAddrAttr { ip: peer.ip(), port: peer.port() };
+                    let mut response = crate::stun::builder::build_allocate_success_response_with_mapped(
+                        &msg.transaction_id, relayed, mapped, allocation.lifetime_secs,
+                    );
+                    sign_response(&mut response, &username, realm, credentials);
+                    Some(response)
                 }
                 Err(AllocationError::PoolExhausted) => {
                     tracing::warn!(username, "Allocate failed: relay port pool exhausted");
@@ -173,6 +199,7 @@ pub fn handle_refresh_datagram(
     credentials: &CredentialStore,
     allocations: &mut AllocationTable,
     max_nonce_age_secs: u64,
+    now: Instant,
 ) -> Option<Vec<u8>> {
     let msg = parse_message(raw).ok()?;
     if msg.class != MessageClass::Request || msg.method != Method::Refresh {
@@ -183,14 +210,22 @@ pub fn handle_refresh_datagram(
         AuthResult::Authenticated { username } => {
             let requested_lifetime = extract_requested_lifetime(&msg);
 
-            match allocations.refresh(peer, requested_lifetime, Instant::now()) {
+            match allocations.refresh(peer, requested_lifetime, now) {
                 Ok(granted) => {
                     tracing::info!(username, granted_lifetime = granted, "Refresh succeeded");
-                    Some(build_refresh_success_response(&msg.transaction_id, granted))
+                    let mut response = build_refresh_success_response(&msg.transaction_id, granted);
+                    sign_response(&mut response, &username, realm, credentials);
+                    Some(response)
                 }
+                // RFC 5766 §7.2: 437 is defined for exactly this — a request that
+                // needs an allocation, with none in place. Silence would leave a
+                // client whose allocation has vanished (a server restart, say)
+                // waiting out timeouts instead of learning at once that it must
+                // allocate again. The CreatePermission and ChannelBind handlers
+                // already answer 437; Refresh had been the odd one out.
                 Err(AllocationError::NoSuchAllocation) => {
-                    tracing::warn!(username, "Refresh for unknown allocation, dropping");
-                    None
+                    tracing::warn!(username, "Refresh for unknown allocation");
+                    Some(crate::stun::builder::build_437_allocation_mismatch(Method::Refresh, &msg.transaction_id))
                 }
                 Err(AllocationError::PoolExhausted) => unreachable!(
                     "refresh never allocates a new port, so pool exhaustion cannot occur here"
@@ -198,5 +233,21 @@ pub fn handle_refresh_datagram(
             }
         }
         result => Some(challenge_response_for(&result, Method::Refresh, &msg.transaction_id, realm)),
+    }
+}
+
+/// Sign a success response with the long-term key of the user who made the
+/// request. RFC 5766 has the server authenticate its responses so a client can
+/// tell a genuine answer from one forged by an off-path attacker — without it, a
+/// forged "success" could point a client at an attacker's relay.
+pub(super) fn sign_response(
+    response: &mut Vec<u8>,
+    username: &str,
+    realm: &str,
+    credentials: &CredentialStore,
+) {
+    if let Some(password) = credentials.password_for(username) {
+        let key = super::auth::long_term_key(username, realm, password);
+        crate::stun::integrity::append_integrity(response, &key);
     }
 }

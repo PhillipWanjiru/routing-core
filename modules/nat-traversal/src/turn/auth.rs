@@ -433,6 +433,23 @@ pub fn build_authenticated_request(
     nonce: &str,
     password: &str,
 ) -> Vec<u8> {
+    build_authenticated_request_with(method, transaction_id, &[], username, realm, nonce, password)
+}
+
+/// Like [`build_authenticated_request`], with extra attributes placed ahead of
+/// the credential ones. Allocate (REQUESTED-TRANSPORT), CreatePermission and
+/// ChannelBind (XOR-PEER-ADDRESS, CHANNEL-NUMBER) and Refresh (LIFETIME) all
+/// need them. `extra_attrs` is already-encoded attribute TLVs; with none this is
+/// byte-for-byte the original, which the worked-example test pins.
+pub fn build_authenticated_request_with(
+    method: crate::stun::parser::Method,
+    transaction_id: &[u8; 12],
+    extra_attrs: &[u8],
+    username: &str,
+    realm: &str,
+    nonce: &str,
+    password: &str,
+) -> Vec<u8> {
     use crate::stun::attributes::{ATTR_MESSAGE_INTEGRITY, ATTR_NONCE, ATTR_REALM, ATTR_USERNAME};
     use crate::stun::builder::{build_attribute, build_header_with_length};
     use crate::stun::parser::MessageClass;
@@ -441,7 +458,7 @@ pub fn build_authenticated_request(
     let realm_attr    = build_attribute(ATTR_REALM, realm.as_bytes());
     let nonce_attr    = build_attribute(ATTR_NONCE, nonce.as_bytes());
 
-    let mut attrs_before_mi = Vec::new();
+    let mut attrs_before_mi = extra_attrs.to_vec();
     attrs_before_mi.extend_from_slice(&username_attr);
     attrs_before_mi.extend_from_slice(&realm_attr);
     attrs_before_mi.extend_from_slice(&nonce_attr);

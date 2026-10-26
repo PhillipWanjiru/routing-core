@@ -240,3 +240,67 @@ pub fn encode_priority(priority: u32) -> Vec<u8> {
 pub fn encode_tie_breaker(tie_breaker: u64) -> Vec<u8> {
     tie_breaker.to_be_bytes().to_vec()
 }
+
+// ─── TURN relay data-path builders (RFC 5766 §10, §11) ──────────
+
+/// IANA IP protocol number for UDP — the only transport this TURN server relays.
+pub const IP_PROTOCOL_UDP: u8 = 17;
+
+/// CHANNEL-NUMBER value: the 16-bit channel number, then 16 reserved bits.
+pub fn encode_channel_number(channel: u16) -> Vec<u8> {
+    let b = channel.to_be_bytes();
+    vec![b[0], b[1], 0, 0]
+}
+
+/// REQUESTED-TRANSPORT value: the IP protocol number, then 24 reserved bits.
+pub fn encode_requested_transport(protocol: u8) -> Vec<u8> {
+    vec![protocol, 0, 0, 0]
+}
+
+/// A Send or Data indication: XOR-PEER-ADDRESS then DATA. The two directions
+/// share one shape — Send goes client → server, Data server → client — and
+/// differ only in method.
+fn build_peer_data_indication(
+    method: Method,
+    txn: &[u8; 12],
+    peer: std::net::SocketAddr,
+    payload: &[u8],
+) -> Vec<u8> {
+    let peer_value = encode_xor_mapped_address(&SocketAddrAttr { ip: peer.ip(), port: peer.port() }, txn);
+    let mut attrs = build_attribute(crate::stun::attributes::ATTR_XOR_PEER_ADDRESS, &peer_value);
+    attrs.extend_from_slice(&build_attribute(crate::stun::attributes::ATTR_DATA, payload));
+    build_message(MessageClass::Indication, method, txn, &attrs)
+}
+
+/// Client → server: relay `payload` to `peer`.
+pub fn build_send_indication(txn: &[u8; 12], peer: std::net::SocketAddr, payload: &[u8]) -> Vec<u8> {
+    build_peer_data_indication(Method::Send, txn, peer, payload)
+}
+
+/// Server → client: `payload` arrived from `peer` on the relayed address. The
+/// peer's identity travels with the data — without it the client could not tell
+/// who sent a packet.
+pub fn build_data_indication(txn: &[u8; 12], peer: std::net::SocketAddr, payload: &[u8]) -> Vec<u8> {
+    build_peer_data_indication(Method::Data, txn, peer, payload)
+}
+
+pub fn build_channel_bind_success_response(txn: &[u8; 12]) -> Vec<u8> {
+    build_message(MessageClass::SuccessResponse, Method::ChannelBind, txn, &[])
+}
+
+/// Allocate success: the relayed address, the client's own reflexive address as
+/// the server saw it, and the granted lifetime (RFC 5766 §6.2). The mapped
+/// address is how a TURN client learns its server-reflexive address for free.
+pub fn build_allocate_success_response_with_mapped(
+    txn: &[u8; 12],
+    relayed: SocketAddrAttr,
+    mapped: SocketAddrAttr,
+    lifetime_secs: u32,
+) -> Vec<u8> {
+    let mut attrs = build_attribute(
+        crate::stun::attributes::ATTR_XOR_RELAYED_ADDRESS, &encode_xor_mapped_address(&relayed, txn),
+    );
+    attrs.extend_from_slice(&build_attribute(ATTR_XOR_MAPPED_ADDRESS, &encode_xor_mapped_address(&mapped, txn)));
+    attrs.extend_from_slice(&build_attribute(crate::stun::attributes::ATTR_LIFETIME, &lifetime_secs.to_be_bytes()));
+    build_message(MessageClass::SuccessResponse, Method::Allocate, txn, &attrs)
+}

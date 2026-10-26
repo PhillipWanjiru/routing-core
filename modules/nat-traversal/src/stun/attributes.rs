@@ -38,6 +38,13 @@ pub const ATTR_USE_CANDIDATE:   u16 = 0x0025;
 pub const ATTR_ICE_CONTROLLED:  u16 = 0x8029;
 pub const ATTR_ICE_CONTROLLING: u16 = 0x802A;
 
+// RFC 5766 §14 TURN attribute types used by the relay data path. Recalled
+// registry values, like every other constant in this project: confirm against
+// the RFC before real-world interop.
+pub const ATTR_CHANNEL_NUMBER:      u16 = 0x000C;
+pub const ATTR_DATA:                u16 = 0x0013;
+pub const ATTR_REQUESTED_TRANSPORT: u16 = 0x0019;
+
 /// STUN address family values (RFC 5389 §15.1).
 const FAMILY_IPV4: u8 = 0x01;
 const FAMILY_IPV6: u8 = 0x02;
@@ -80,6 +87,12 @@ pub enum Attribute {
     IceControlling(u64),
     /// RFC 5389 §15.5: CRC-32 XOR 0x5354554e of the message so far.
     Fingerprint(u32),
+    /// RFC 5766 §14.4: the relayed payload of a Send or Data indication.
+    Data(Vec<u8>),
+    /// RFC 5766 §14.1: the channel being bound (the 16 reserved bits are dropped).
+    ChannelNumber(u16),
+    /// RFC 5766 §14.7: the IP protocol the client wants relayed (17 = UDP).
+    RequestedTransport(u8),
     Unknown { attr_type: u16, value: Vec<u8> },
 }
 
@@ -186,6 +199,16 @@ fn decode_one(attr_type: u16, value: &[u8], transaction_id: &[u8; 12]) -> Option
         ATTR_ICE_CONTROLLED  => decode_u64_exact(value).map(Attribute::IceControlled),
         ATTR_ICE_CONTROLLING => decode_u64_exact(value).map(Attribute::IceControlling),
         ATTR_FINGERPRINT     => decode_u32_exact(value).map(Attribute::Fingerprint),
+        ATTR_DATA => Some(Attribute::Data(value.to_vec())),
+        // CHANNEL-NUMBER and REQUESTED-TRANSPORT are 4 bytes: one real field and
+        // reserved bits. A wrong-sized value is dropped, as for every other
+        // fixed-size attribute.
+        ATTR_CHANNEL_NUMBER => {
+            if value.len() == 4 { Some(Attribute::ChannelNumber(u16::from_be_bytes([value[0], value[1]]))) } else { None }
+        }
+        ATTR_REQUESTED_TRANSPORT => {
+            if value.len() == 4 { Some(Attribute::RequestedTransport(value[0])) } else { None }
+        }
         ATTR_USERNAME => decode_utf8(value).ok().map(Attribute::Username),
         ATTR_REALM    => decode_utf8(value).ok().map(Attribute::Realm),
         ATTR_NONCE    => decode_utf8(value).ok().map(Attribute::Nonce),

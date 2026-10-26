@@ -179,7 +179,7 @@ async fn main() {
 ///   3. A separate attempt with WRONG credentials -> rejected with a
 ///      fresh 401, not silently accepted
 async fn run_turn_auth_demo() {
-    use turn::{authenticate_request, build_authenticated_request, handle_allocate_datagram};
+    use turn::{authenticate_request, build_authenticated_request, build_authenticated_request_with, handle_allocate_datagram};
     use turn::{AuthResult, CredentialAttempt, CredentialStore};
 
     const TURN_SERVER_ADDR: &str = "127.0.0.1:3479";
@@ -204,7 +204,10 @@ async fn run_turn_auth_demo() {
                 Ok(v) => v,
                 Err(_) => break,
             };
-            if let Some(resp) = handle_allocate_datagram(&buf[..n], peer, REALM, &credentials, &mut allocations, 3600) {
+            if let Some(resp) = handle_allocate_datagram(
+                &buf[..n], peer, "127.0.0.1".parse().unwrap(), REALM, &credentials, &mut allocations, 3600,
+                std::time::Instant::now(),
+            ) {
                 let _ = server_socket.send_to(&resp, peer).await;
             }
         }
@@ -259,8 +262,12 @@ async fn run_turn_auth_demo() {
 
     // ── Step 2: resend with CORRECT credentials -> expect Success ──────
     let txn_id_2 = gen_transaction_id();
-    let authed_request = build_authenticated_request(
-        Method::Allocate, &txn_id_2, USERNAME, &realm, &nonce, CORRECT_PASSWORD,
+    let transport = stun::builder::build_attribute(
+        stun::attributes::ATTR_REQUESTED_TRANSPORT,
+        &stun::builder::encode_requested_transport(stun::builder::IP_PROTOCOL_UDP),
+    );
+    let authed_request = build_authenticated_request_with(
+        Method::Allocate, &txn_id_2, &transport, USERNAME, &realm, &nonce, CORRECT_PASSWORD,
     );
     client_socket.send_to(&authed_request, TURN_SERVER_ADDR).await.expect("send authenticated Allocate");
     tracing::info!("Client → Allocate (USERNAME={USERNAME}, correct password, MESSAGE-INTEGRITY attached)");

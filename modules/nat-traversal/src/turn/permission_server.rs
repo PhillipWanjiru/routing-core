@@ -58,6 +58,7 @@ pub fn handle_create_permission_datagram(
     allocations: &AllocationTable,
     permissions: &mut PermissionTable,
     max_nonce_age_secs: u64,
+    now: Instant,
 ) -> Option<Vec<u8>> {
     let msg = parse_message(raw).ok()?;
     if msg.class != MessageClass::Request || msg.method != Method::CreatePermission {
@@ -96,7 +97,6 @@ pub fn handle_create_permission_datagram(
 
             // Commit only after the full set is known to be acceptable —
             // see this module's atomicity note.
-            let now = Instant::now();
             for ip in &peer_ips {
                 permissions.create_or_refresh(peer, *ip, now);
             }
@@ -105,7 +105,9 @@ pub fn handle_create_permission_datagram(
                 username, peer_count = peer_ips.len(),
                 "CreatePermission succeeded"
             );
-            Some(build_create_permission_success_response(&msg.transaction_id))
+            let mut response = build_create_permission_success_response(&msg.transaction_id);
+            super::server::sign_response(&mut response, &username, realm, credentials);
+            Some(response)
         }
         result => Some(challenge_response_for(
             &result, Method::CreatePermission, &msg.transaction_id, realm,

@@ -398,10 +398,9 @@ fn peer_to_client_forwards_when_permitted() {
     let decision = decide_peer_to_client(
         relay_port, p, b"inbound".to_vec(), &allocations, &permissions, &channels, now,
     );
-    assert_eq!(
-        decision, RelayDecision::Forward { to: c, payload: b"inbound".to_vec() },
-        "with no channel bound, the payload is delivered unframed"
-    );
+    let (to, payload) = forwarded(decision);
+    assert_eq!(to, c);
+    assert_data_indication(&payload, p, b"inbound");
 }
 
 #[test]
@@ -470,7 +469,7 @@ fn peer_to_client_uses_channeldata_framing_when_channel_is_bound() {
 }
 
 #[test]
-fn peer_to_client_falls_back_to_unframed_when_channel_expired() {
+fn peer_to_client_falls_back_to_a_data_indication_when_channel_expired() {
     let t0 = Instant::now();
     let c = client(5000);
     let p = peer(7, 9000);
@@ -488,10 +487,9 @@ fn peer_to_client_falls_back_to_unframed_when_channel_expired() {
     let decision = decide_peer_to_client(
         relay_port, p, b"abc".to_vec(), &allocations, &permissions, &channels, later,
     );
-    assert_eq!(
-        decision, RelayDecision::Forward { to: c, payload: b"abc".to_vec() },
-        "an expired channel must fall back to unframed delivery, not drop the packet"
-    );
+    let (to, payload) = forwarded(decision);
+    assert_eq!(to, c, "an expired channel must fall back to a Data indication, not drop the packet");
+    assert_data_indication(&payload, p, b"abc");
 }
 
 #[test]
@@ -518,7 +516,9 @@ fn relay_isolates_two_clients_from_each_other() {
     let to_a = decide_peer_to_client(
         port_a, peer_a, b"x".to_vec(), &allocations, &permissions, &channels, now,
     );
-    assert_eq!(to_a, RelayDecision::Forward { to: client_a, payload: b"x".to_vec() });
+    let (to, payload) = forwarded(to_a);
+    assert_eq!(to, client_a, "data for A's allocation must go to A");
+    assert_data_indication(&payload, peer_a, b"x");
 
     // The same peer arriving on B's port → dropped, since B never
     // permitted it. Relay ports must not be interchangeable.
@@ -526,4 +526,27 @@ fn relay_isolates_two_clients_from_each_other() {
         port_b, peer_a, b"x".to_vec(), &allocations, &permissions, &channels, now,
     );
     assert_eq!(to_b, RelayDecision::Drop(DropReason::NoPermission));
+}
+
+fn forwarded(decision: RelayDecision) -> (std::net::SocketAddr, Vec<u8>) {
+    match decision {
+        RelayDecision::Forward { to, payload } => (to, payload),
+        other => panic!("expected Forward, got {other:?}"),
+    }
+}
+
+/// With no channel bound, peer data must reach the client as a Data indication
+/// that names the peer — a bare payload would leave the client unable to tell
+/// who sent it.
+fn assert_data_indication(wire: &[u8], peer: std::net::SocketAddr, payload: &[u8]) {
+    use nat_traversal::stun::attributes::{decode_attributes, Attribute};
+    use nat_traversal::stun::parser::{parse_message, MessageClass, Method};
+    let msg = parse_message(wire).expect("a Data indication, not a bare payload");
+    assert_eq!((msg.class, msg.method), (MessageClass::Indication, Method::Data));
+    let attrs = decode_attributes(&msg.attributes_raw, &msg.transaction_id);
+    assert!(attrs.contains(&Attribute::Data(payload.to_vec())), "DATA must carry the payload");
+    assert!(
+        attrs.iter().any(|a| matches!(a, Attribute::XorPeerAddress(x) if x.ip == peer.ip() && x.port == peer.port())),
+        "XOR-PEER-ADDRESS must name the peer"
+    );
 }

@@ -361,10 +361,14 @@ pub fn decide_peer_to_client(
     }
 
     // Prefer ChannelData framing when a channel is bound — 4 bytes of
-    // overhead instead of a full Data indication.
+    // overhead instead of a full Data indication. With no channel the peer's
+    // identity has to travel with the data, so it goes in a Data indication:
+    // a bare payload would leave the client unable to tell who sent it.
     let framed = match channels.channel_for_peer(&client_addr, &peer_addr, now) {
         Some(channel) => build_channel_data(channel, &payload),
-        None => payload,
+        None => crate::stun::builder::build_data_indication(
+            &crate::ice::random::random_bytes::<12>(), peer_addr, &payload,
+        ),
     };
 
     RelayDecision::Forward { to: client_addr, payload: framed }

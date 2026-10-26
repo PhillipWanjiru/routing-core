@@ -389,7 +389,7 @@ fn create_permission_succeeds_and_installs_permission() {
 
     let req = authed_create_permission(&txn_id, &nonce, &[target]);
     let resp = handle_create_permission_datagram(
-        &req, c, TEST_REALM, &store(), &allocations, &mut permissions, 3600,
+        &req, c, TEST_REALM, &store(), &allocations, &mut permissions, 3600, Instant::now(),
     ).expect("should respond");
 
     let parsed = parse_message(&resp).expect("response must parse");
@@ -417,7 +417,7 @@ fn create_permission_installs_all_named_peers() {
 
     let req = authed_create_permission(&[0x66u8; 12], &nonce, &targets);
     handle_create_permission_datagram(
-        &req, c, TEST_REALM, &store(), &allocations, &mut permissions, 3600,
+        &req, c, TEST_REALM, &store(), &allocations, &mut permissions, 3600, Instant::now(),
     ).expect("should respond");
 
     let check_at = Instant::now();
@@ -437,7 +437,7 @@ fn create_permission_without_allocation_returns_437() {
 
     let req = authed_create_permission(&[0x77u8; 12], &nonce, &[peer_ip(7)]);
     let resp = handle_create_permission_datagram(
-        &req, c, TEST_REALM, &store(), &allocations, &mut permissions, 3600,
+        &req, c, TEST_REALM, &store(), &allocations, &mut permissions, 3600, Instant::now(),
     ).expect("should respond");
 
     let parsed = parse_message(&resp).unwrap();
@@ -469,7 +469,7 @@ fn create_permission_with_no_peer_addresses_returns_400() {
     // Empty peer list — malformed per RFC 5766 §9.1.
     let req = authed_create_permission(&[0x88u8; 12], &nonce, &[]);
     let resp = handle_create_permission_datagram(
-        &req, c, TEST_REALM, &store(), &allocations, &mut permissions, 3600,
+        &req, c, TEST_REALM, &store(), &allocations, &mut permissions, 3600, Instant::now(),
     ).expect("should respond");
 
     let parsed = parse_message(&resp).unwrap();
@@ -497,7 +497,7 @@ fn create_permission_unauthenticated_returns_challenge_not_permission() {
     let bare = build_message(MessageClass::Request, Method::CreatePermission, &txn_id, &[]);
 
     let resp = handle_create_permission_datagram(
-        &bare, c, TEST_REALM, &store(), &allocations, &mut permissions, 3600,
+        &bare, c, TEST_REALM, &store(), &allocations, &mut permissions, 3600, Instant::now(),
     ).expect("should respond with a challenge");
 
     let parsed = parse_message(&resp).unwrap();
@@ -524,7 +524,7 @@ fn create_permission_ignores_non_matching_methods() {
     // An Allocate request handed to the CreatePermission handler.
     let wrong = build_message(MessageClass::Request, Method::Allocate, &[0xAAu8; 12], &[]);
     let resp = handle_create_permission_datagram(
-        &wrong, c, TEST_REALM, &store(), &allocations, &mut permissions, 3600,
+        &wrong, c, TEST_REALM, &store(), &allocations, &mut permissions, 3600, Instant::now(),
     );
     assert!(resp.is_none(), "a non-CreatePermission request must be silently ignored");
 }
@@ -536,7 +536,7 @@ fn create_permission_ignores_unparseable_garbage() {
     let mut permissions = PermissionTable::new();
 
     let resp = handle_create_permission_datagram(
-        &[0xFF; 8], c, TEST_REALM, &store(), &allocations, &mut permissions, 3600,
+        &[0xFF; 8], c, TEST_REALM, &store(), &allocations, &mut permissions, 3600, Instant::now(),
     );
     assert!(resp.is_none(), "garbage must be dropped, not panic");
 }
