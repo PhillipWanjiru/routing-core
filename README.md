@@ -89,6 +89,11 @@ plus deliberate rule-breaking — rather than to review by eye. Contribution and
 commit conventions are in [CONTRIBUTING.md](CONTRIBUTING.md); history by
 version is in [CHANGELOG.md](CHANGELOG.md).
 
+The history up to v0.5.0 was reconstructed from milestone snapshots taken while
+the project was built: one commit per milestone, dated from when that snapshot
+was created (June to October 2026), and each tagged release builds and passes
+its recorded test count. From there on, changes are committed as they are made.
+
 ## License
 
 No license has been chosen yet; until one is added, all rights are reserved.
