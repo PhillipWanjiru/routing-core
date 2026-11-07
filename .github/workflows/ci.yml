@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # The tree builds warning-free; keep it that way. Dependencies are exempt
+  # (cargo caps their lints), so this only gates our own code.
+  RUSTFLAGS: -D warnings
+
+jobs:
+  test:
+    name: build and test (Rust 1.75)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1.75 is the toolchain the project is developed and verified against.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.75.0"
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build (all targets)
+        run: cargo build --workspace --all-targets --locked
+
+      # --no-fail-fast so one failing binary does not hide the others.
+      - name: Test
+        run: cargo test --workspace --locked --no-fail-fast
