@@ -7,9 +7,13 @@ minor release may change interfaces.
 
 ## [Unreleased]
 
+### Added
+- `TurnClient`: a sans-IO TURN client. Allocates through the long-term-credential
+  challenge, believes only signed success responses, refreshes the allocation,
+  permissions and channel bindings, and sends and receives peer data as
+  indications or ChannelData.
+
 ### Planned
-- TURN client (sans-IO): allocate with the 401 challenge, verify signed
-  responses, refresh, permissions, data wrapping.
 - UDP driver for the TURN server.
 - Relayed candidates in ICE, with an end-to-end test of two agents behind
   symmetric NATs completing through the relay.

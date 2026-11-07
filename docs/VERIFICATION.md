@@ -41,6 +41,7 @@ one can quietly agree with a wrong implementation.
 | ICE responder, triggered checks, role conflicts | 15 | 15 |
 | ICE nomination and completion | 14 | 14 |
 | TURN server core | 16 | 16 |
+| TURN client | 12 | 12 |
 
 Each count is *after* the test fixes described below; the first pass found
 weak tests in three of the four areas.

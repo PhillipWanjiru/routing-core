@@ -44,7 +44,7 @@ what to send. Consequences:
   period, because the controlled side completes only after the controlling side
   answers its check.
 
-The ICE agent has a driver; the TURN server's driver is pending.
+The ICE agent has a driver; the TURN server and client are sans-IO too, with their drivers pending.
 
 ## NAT traversal
 

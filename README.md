@@ -31,7 +31,7 @@ the others down.
 | Media: RTP, adaptive jitter buffer, G.711, SRTP with SDES, MOS (E-model) | Implemented (G.711 only; Opus and G.722 planned) |
 | STUN: message codec, Binding server | Implemented |
 | TURN server: authentication, allocation, permissions, ChannelBind, relay | Core implemented (sans-IO); UDP driver pending |
-| TURN client | Planned (next) |
+| TURN client | Implemented (sans-IO); signed-response verification, refresh, permissions, channels |
 | ICE: gathering, pairing, checks, triggered checks, role conflicts, nomination, real-socket driver | Implemented; relayed candidates pending |
 | QoS (DSCP, admission control), dynamic firewall, XDP flood mitigation, fraud detection | Planned |
 | CDR pipeline, WebRTC gateway, dashboard | Planned |
@@ -75,8 +75,8 @@ runs on a virtual clock.
 
 ## Roadmap
 
-1. TURN client, a UDP driver for the TURN server, and relayed candidates in
-   ICE, ending with the symmetric-NAT case completing through the relay.
+1. A UDP driver for the TURN server and relayed candidates in ICE, ending with
+   the symmetric-NAT case completing through the relay.
 2. QoS: DSCP marking, Erlang-B admission control, dynamic firewall rules.
 3. Flood mitigation and fraud detection.
 4. Observability, CDR pipeline and a WebRTC gateway.

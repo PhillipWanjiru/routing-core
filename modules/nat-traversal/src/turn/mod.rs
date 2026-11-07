@@ -3,6 +3,7 @@
 pub mod allocation;
 pub mod auth;
 pub mod channel_server;
+pub mod client;
 pub mod permission;
 pub mod permission_server;
 pub mod relay;
@@ -28,4 +29,7 @@ pub use auth::{
 pub use channel_server::handle_channel_bind_datagram;
 pub use permission_server::handle_create_permission_datagram;
 pub use service::{TurnOutput, TurnServer};
+pub use client::{
+    TurnClient, TurnClientAction, TurnClientConfig, TurnClientEvent, TurnClientPhase, TurnClientStep,
+};
 pub use server::{handle_allocate_datagram, handle_refresh_datagram};
