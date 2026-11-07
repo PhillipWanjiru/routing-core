@@ -1,0 +1,12 @@
+# Build output
+/target
+
+# Editor and OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Packet captures are evidence, not source
+*.pcap
+*.pcapng
