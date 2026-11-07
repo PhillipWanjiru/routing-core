@@ -1,0 +1,83 @@
+# Verification
+
+A passing test suite proves little if the tests share the code's
+misunderstanding. This project layers several kinds of check so that no single
+one can quietly agree with a wrong implementation.
+
+## Layers
+
+1. **Reference vectors.** Hash and checksum primitives are checked against
+   published values: MD5, SHA-1, HMAC-SHA1 (RFC 2202 case 1) and the standard
+   CRC-32 check value.
+2. **An independent oracle.** Messages are built by a separate Python
+   implementation (`hmac`, `hashlib`, `zlib`) from the RFC's construction
+   rules, and the oracle re-parses its own output to confirm the HMAC and CRC
+   before writing a fixture. Fixtures are *generated*, never hand-copied. The
+   Rust builders must reproduce them byte-for-byte and the validators must
+   accept them. This is how the MESSAGE-INTEGRITY "adjusted length" trap — the
+   most common STUN/TURN interoperability bug — was checked in both the build
+   and verify directions.
+3. **Exhaustive properties.** Every single-bit flip is detected by CRC-32 and by
+   the HMAC, over every bit of every byte of a message; every role and
+   tie-breaker combination ends with exactly one controlling agent.
+4. **Virtual-time simulation.** State machines run on an explicit clock. Two
+   agents negotiate through an in-memory network with injectable loss, latency
+   and NAT models (address-restricted cone and symmetric), including the
+   *negative* case: two symmetric NATs must fail, and the agents must conclude
+   so rather than hang.
+5. **Real sockets.** The same state machine is driven over UDP on loopback with
+   the wall clock. The suite was run 25 times in a row (125 executions) to
+   look for timing flakiness; none.
+6. **Mutation testing.** For each security- or timing-critical rule, the rule is
+   broken on purpose and the test written for it must fail.
+7. **Smoke fuzzing.** Parsers are fed randomised and mutated inputs and must
+   never panic.
+
+## Mutation results
+
+| Area | Rules broken | Caught by their intended test |
+|---|---|---|
+| ICE connectivity-check agent, initiator | 8 | 8 |
+| ICE responder, triggered checks, role conflicts | 15 | 15 |
+| ICE nomination and completion | 14 | 14 |
+| TURN server core | 16 | 16 |
+
+Each count is *after* the test fixes described below; the first pass found
+weak tests in three of the four areas.
+
+## What mutation testing caught
+
+Tests that could not fail, found because breaking the rule left them green:
+
+- A NAT test named "through triggered checks" still passed with triggered
+  checks disabled, because ordinary retransmission eventually connected. Fixed
+  with a timing bound only a triggered check can meet.
+- "Expiry clears permissions" passed vacuously: a 300 s permission is already
+  dead when a 600 s allocation expires. Rewritten to refresh the permission
+  late, so only the sweep can remove it.
+- "A controlled agent never nominates" missed a controlled agent nominating
+  itself, because the message builder strips USE-CANDIDATE for that role and
+  the mutant sent a plain-looking check. The assertion became "sends nothing".
+- A guard preventing a completed agent from learning new candidates had no test
+  at all.
+
+A harness artifact is recorded too: one "missed" mutation was only cargo
+stopping at the first failing test binary; `--no-fail-fast` showed the intended
+test did fail.
+
+Reading code, not only testing it, found five defects in the TURN relay that
+its tests had been written around: the relayed address advertised the client's
+IP; handlers read the system clock; peer data reached the client with no
+indication of which peer sent it; deallocation left permissions behind; and a
+Refresh for an unknown allocation got silence rather than 437. One existing test
+had enshrined the missing Data indication as expected behaviour.
+
+## What is not verified
+
+- **Interoperability.** The oracle is this project's own reading of the RFCs,
+  not an independent stack. Testing against a third-party ICE/TURN/SIP
+  implementation is still to do.
+- **Real NATs.** The models are simplifications.
+- **Coverage-guided fuzzing**, which needs a nightly toolchain.
+- **Recalled constants.** Attribute and error-code numbers recalled from memory
+  rather than checked against the RFC text are flagged where they are defined.
