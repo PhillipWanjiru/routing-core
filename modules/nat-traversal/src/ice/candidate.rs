@@ -49,10 +49,9 @@ pub enum CandidateType {
     /// This endpoint's public mapping as observed by a STUN server
     /// (RFC 5389 Binding request/response) — see `gather.rs`.
     ServerReflexive,
-    /// A relay port allocated on a TURN server (RFC 5766 Allocate) —
-    /// gathering support not yet built in this module; the allocation
-    /// and relay mechanics themselves already exist in `turn::allocation`
-    /// and `turn::relay`.
+    /// A relay port allocated on a TURN server (RFC 5766 Allocate). Build
+    /// one with [`Candidate::relayed`]; the agent's traffic to and from it is
+    /// carried by `ice_turn::TurnBridge`.
     Relayed,
 }
 
@@ -75,15 +74,23 @@ pub struct Candidate {
     pub candidate_type: CandidateType,
     /// The transport address a peer would actually send to.
     pub transport_addr: SocketAddr,
-    /// For host candidates, the same as `transport_addr`. For
-    /// server-reflexive/relayed candidates, the *local* address the
-    /// gathering socket was bound to before NAT/relay translation —
-    /// RFC 8445 calls this the candidate's "base," and it matters for
-    /// foundation grouping (§5.1.1.3): two server-reflexive candidates
-    /// discovered from the same local socket share a foundation even
-    /// though their public-facing `transport_addr` is identical, because
-    /// what actually determines "these behave the same way" is the base,
-    /// not the externally-visible address.
+    /// The address the agent sends *from* when it uses this candidate: it
+    /// sends a pair's checks from the local candidate's `base_addr`, and it
+    /// prunes pairs that share a base and a remote candidate.
+    ///
+    /// * **Host:** the same as `transport_addr`.
+    /// * **Server-reflexive:** the local socket the mapping was discovered
+    ///   through (RFC 8445 §5.1.1.3 calls this the "base"). Two such
+    ///   candidates found from one socket share a foundation even if their
+    ///   public addresses differ, and a server-reflexive pair is redundant
+    ///   with the host pair on the same base, because both send the same
+    ///   packet.
+    /// * **Relayed:** the relayed transport address *itself* (RFC 8445
+    ///   §5.1.1.2). Sending "from" a relayed candidate means sending through
+    ///   the TURN allocation, so its base cannot be the client's own socket:
+    ///   with that base the agent would send from the host socket, bypassing
+    ///   the relay, and would prune the relayed pair as a duplicate of the
+    ///   host pair. Build relayed candidates with [`Candidate::relayed`].
     pub base_addr: SocketAddr,
     /// RFC 8445 §5.1.1.3 grouping string — same type + same base address
     /// + same protocol (this project is UDP-only so far) yields the same
@@ -133,6 +140,14 @@ impl Candidate {
             component_id,
             priority_override: None,
         }
+    }
+
+    /// A relayed candidate: the transport address a TURN server allocated for
+    /// this agent. It is its own base (see [`Candidate::base_addr`]), which is
+    /// what makes the agent send its checks through the allocation rather than
+    /// from the host socket.
+    pub fn relayed(relayed_addr: SocketAddr, local_preference: u16, component_id: u8) -> Self {
+        Candidate::new(CandidateType::Relayed, relayed_addr, relayed_addr, local_preference, component_id)
     }
 
     /// A remote peer-reflexive candidate: an address the peer's check came
