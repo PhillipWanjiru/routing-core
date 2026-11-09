@@ -18,6 +18,11 @@ minor release may change interfaces.
   unwraps what comes back (STUN to the agent, media to the caller), and keeps
   TURN permissions in step with the peer's candidate list.
 - `Candidate::relayed`.
+- `turn::driver::run_turn_server`: runs a `TurnServer` over real UDP sockets. It opens
+  and closes one relay socket per allocation, sweeps expired state on a timer, and
+  shuts down cleanly, returning the server.
+- `TurnServer::abandon`: gives up an allocation whose relay socket could not be
+  opened, so no success is sent for a relay that does not exist.
 - An end-to-end test: two symmetric NATs, which ICE alone cannot connect, now
   connect through a relay, with media flowing both ways.
 
@@ -27,7 +32,6 @@ minor release may change interfaces.
   relay and its pair is pruned as a duplicate of the host pair.
 
 ### Planned
-- UDP driver for the TURN server.
 - Relayed candidates in the real-socket ICE driver.
 
 ## [0.5.0] - 2026-10-26

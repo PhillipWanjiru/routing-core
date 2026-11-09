@@ -241,6 +241,23 @@ impl TurnServer {
 
     // ─── Housekeeping ────────────────────────────────────────────
 
+    /// Give up `client`'s allocation as if it had deallocated: the port returns
+    /// to the pool and its permissions and channel bindings go.
+    ///
+    /// For a driver whose relay socket could not be opened. `RelayOpened` comes
+    /// before the Allocate success response, so the driver finds out before the
+    /// client has been told anything; it abandons the allocation and withholds
+    /// the success rather than advertise a relay that does not exist.
+    pub fn abandon(&mut self, client: &SocketAddr, now: Instant) -> Vec<TurnOutput> {
+        let Some(relay_port) = self.allocations.get(client).map(|a| a.relay_port) else {
+            return Vec::new();
+        };
+        let _ = self.allocations.refresh(*client, Some(0), now);
+        self.forget(client);
+        vec![TurnOutput::RelayClosed { relay_port }]
+    }
+
+
     /// Expire allocations, permissions and channel bindings whose lifetimes have
     /// passed, reporting each relay socket that should now be closed.
     pub fn sweep(&mut self, now: Instant) -> Vec<TurnOutput> {

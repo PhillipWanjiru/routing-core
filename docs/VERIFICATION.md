@@ -43,6 +43,7 @@ one can quietly agree with a wrong implementation.
 | TURN server core | 16 | 16 |
 | TURN client | 12 | 12 |
 | ICE over TURN: bridge rules and relayed priority | 8 | 8 |
+| TURN server UDP driver | 7 | 7 |
 
 Each count is *after* the test fixes described below; the first pass found
 weak tests in three of the four areas.

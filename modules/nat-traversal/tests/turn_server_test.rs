@@ -753,3 +753,55 @@ fn extra_attributes_are_covered_by_message_integrity() {
     tampered[24] ^= 0x01; // inside REQUESTED-TRANSPORT, the first attribute
     assert!(!verify_integrity(&tampered, &key()), "an attacker must not be able to change the requested transport");
 }
+
+// ─── Abandoning an allocation ──────────────────────────────────────
+//
+// For a driver whose relay socket could not be opened: the allocation is given
+// up as if the client had deallocated it.
+
+#[test]
+fn abandoning_an_allocation_removes_it_and_reports_the_relay_closed() {
+    let (mut s, t0, c) = (server(), Instant::now(), client(1));
+    let port = allocate(&mut s, c, t0);
+    assert_eq!(s.abandon(&c, t0), vec![TurnOutput::RelayClosed { relay_port: port }]);
+    assert!(s.allocation_for(&c).is_none());
+}
+
+#[test]
+fn abandoning_clears_permissions_and_channels_too() {
+    let (mut s, t0, c) = (server(), Instant::now(), client(1));
+    allocate(&mut s, c, t0);
+    permit(&mut s, c, &[peer(7, 9000)], t0);
+    s.handle_from_client(c, &channel_bind_req(3, 0x4001, peer(8, 9001)), t0);
+    assert!(s.has_permission(&c, peer(7, 9000).ip(), t0));
+
+    s.abandon(&c, t0);
+    assert!(!s.has_permission(&c, peer(7, 9000).ip(), t0), "a later allocation from this address must not inherit it");
+    assert!(s.channel_peer(&c, 0x4001, t0).is_none());
+}
+
+#[test]
+fn an_abandoned_port_becomes_available_again() {
+    // A pool of exactly one port: a second client can have it only if the
+    // abandoned allocation really released it.
+    let mut creds = CredentialStore::new();
+    creds.add_user(USER, PASS);
+    let mut s = TurnServer::new(REALM, RELAY_IP.parse().unwrap(), creds, PortPool::new(50000, 50000));
+    let t0 = Instant::now();
+
+    allocate(&mut s, client(1), t0);
+    let refused = s.handle_from_client(client(2), &allocate_req(1), t0);
+    assert!(!is_success(&the_reply(&refused)), "setup: the pool is exhausted");
+
+    s.abandon(&client(1), t0);
+    let granted = s.handle_from_client(client(2), &allocate_req(1), t0);
+    assert!(is_success(&the_reply(&granted)), "the abandoned port must be reusable");
+}
+
+#[test]
+fn abandoning_an_unknown_client_does_nothing() {
+    let (mut s, t0) = (server(), Instant::now());
+    allocate(&mut s, client(1), t0);
+    assert!(s.abandon(&client(9), t0).is_empty());
+    assert!(s.allocation_for(&client(1)).is_some(), "and it must not touch anyone else's allocation");
+}

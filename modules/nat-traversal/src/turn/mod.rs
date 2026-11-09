@@ -4,6 +4,7 @@ pub mod allocation;
 pub mod auth;
 pub mod channel_server;
 pub mod client;
+pub mod driver;
 pub mod permission;
 pub mod permission_server;
 pub mod relay;

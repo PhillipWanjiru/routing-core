@@ -30,7 +30,7 @@ the others down.
 | SIP: parser, SDP, transactions, registrar, UDP user-agent server | Implemented. Dialog, proxy and B2BUA are present but not yet tested |
 | Media: RTP, adaptive jitter buffer, G.711, SRTP with SDES, MOS (E-model) | Implemented (G.711 only; Opus and G.722 planned) |
 | STUN: message codec, Binding server | Implemented |
-| TURN server: authentication, allocation, permissions, ChannelBind, relay | Core implemented (sans-IO); UDP driver pending |
+| TURN server: authentication, allocation, permissions, ChannelBind, relay | Implemented: a sans-IO core and a UDP driver with one relay socket per allocation |
 | TURN client | Implemented (sans-IO); signed-response verification, refresh, permissions, channels |
 | ICE: gathering, pairing, checks, triggered checks, role conflicts, nomination, real-socket driver | Implemented |
 | ICE over TURN: relayed candidates, permission management, routing agent traffic through an allocation | Implemented (sans-IO); proven in simulation, including two symmetric NATs; not yet in the real-socket driver |
@@ -74,14 +74,14 @@ runs on a virtual clock.
   not the RFCs' published vectors.
 - NAT behaviour is modelled (address-restricted cone and symmetric), not
   measured on real devices.
-- The relay path is proven in simulation only. It has not run over real sockets
-  or against a third-party TURN server.
+- The TURN server runs over real sockets, but ICE over TURN is proven in
+  simulation only, and nothing has run against a third-party TURN server or
+  client.
 
 ## Roadmap
 
-1. A UDP driver for the TURN server, and relayed candidates in the real-socket
-   ICE driver, so the symmetric-NAT case runs over real sockets rather than
-   only in simulation.
+1. Relayed candidates in the real-socket ICE driver, so the relay path runs over
+   real sockets rather than only in simulation.
 2. QoS: DSCP marking, Erlang-B admission control, dynamic firewall rules.
 3. Flood mitigation and fraud detection.
 4. Observability, CDR pipeline and a WebRTC gateway.
