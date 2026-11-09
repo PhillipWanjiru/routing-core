@@ -32,13 +32,15 @@ the others down.
 | STUN: message codec, Binding server | Implemented |
 | TURN server: authentication, allocation, permissions, ChannelBind, relay | Core implemented (sans-IO); UDP driver pending |
 | TURN client | Implemented (sans-IO); signed-response verification, refresh, permissions, channels |
-| ICE: gathering, pairing, checks, triggered checks, role conflicts, nomination, real-socket driver | Implemented; relayed candidates pending |
+| ICE: gathering, pairing, checks, triggered checks, role conflicts, nomination, real-socket driver | Implemented |
+| ICE over TURN: relayed candidates, permission management, routing agent traffic through an allocation | Implemented (sans-IO); proven in simulation, including two symmetric NATs; not yet in the real-socket driver |
 | QoS (DSCP, admission control), dynamic firewall, XDP flood mitigation, fraud detection | Planned |
 | CDR pipeline, WebRTC gateway, dashboard | Planned |
 
 Two agents behind two **symmetric** NATs cannot connect directly — the test
-suite asserts this — which is exactly the case a TURN relay exists for and the
-next piece of work.
+suite asserts this. Through a TURN relay they do: an end-to-end test runs two
+real ICE agents, two real TURN clients and a real TURN server over simulated
+symmetric NATs, in virtual time, and checks that media flows both ways.
 
 ## Repository layout
 
@@ -72,11 +74,14 @@ runs on a virtual clock.
   not the RFCs' published vectors.
 - NAT behaviour is modelled (address-restricted cone and symmetric), not
   measured on real devices.
+- The relay path is proven in simulation only. It has not run over real sockets
+  or against a third-party TURN server.
 
 ## Roadmap
 
-1. A UDP driver for the TURN server and relayed candidates in ICE, ending with
-   the symmetric-NAT case completing through the relay.
+1. A UDP driver for the TURN server, and relayed candidates in the real-socket
+   ICE driver, so the symmetric-NAT case runs over real sockets rather than
+   only in simulation.
 2. QoS: DSCP marking, Erlang-B admission control, dynamic firewall rules.
 3. Flood mitigation and fraud detection.
 4. Observability, CDR pipeline and a WebRTC gateway.

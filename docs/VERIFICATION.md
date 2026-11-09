@@ -42,6 +42,7 @@ one can quietly agree with a wrong implementation.
 | ICE nomination and completion | 14 | 14 |
 | TURN server core | 16 | 16 |
 | TURN client | 12 | 12 |
+| ICE over TURN: bridge rules and relayed priority | 8 | 8 |
 
 Each count is *after* the test fixes described below; the first pass found
 weak tests in three of the four areas.
@@ -72,6 +73,11 @@ IP; handlers read the system clock; peer data reached the client with no
 indication of which peer sent it; deallocation left permissions behind; and a
 Refresh for an unknown allocation got silence rather than 437. One existing test
 had enshrined the missing Data indication as expected behaviour.
+
+Reading the ICE candidate documentation found a further error before any relay
+code was written: it gave a relayed candidate the local socket as its base, which
+would have sent its checks around the relay and pruned the relayed pair as a
+duplicate of the host pair. A regression test reproduces the pruning.
 
 ## What is not verified
 

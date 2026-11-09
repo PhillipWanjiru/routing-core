@@ -76,6 +76,27 @@ Behaviours worth knowing:
 - **Regular nomination with a short delay.** The highest-priority pair is often
   a dead private address; waiting for it to time out would stall a working path
   for the full transaction timeout (about 40 s with RFC defaults).
+- **A relayed candidate is its own base.** The agent sends a pair's checks from
+  the local candidate's base, so a relayed candidate's checks leave through the
+  allocation rather than the host socket. Any other base would bypass the relay
+  and get the relayed pair pruned as a duplicate of the host pair.
+
+### Over a relay
+
+`ice_turn::TurnBridge` joins an ICE agent to a TURN client without either
+knowing about the other. The agent names its local candidates by address, and a
+relayed candidate is an address that is not a real socket; the bridge makes it
+one. Sends from the relayed address are wrapped for the TURN server, and dropped
+rather than diverted to the host socket if the allocation is gone. Data
+indications and ChannelData from the server are unwrapped: STUN payloads go to
+the agent as arriving at the relayed address, and anything else is returned as
+media.
+
+TURN permissions are by IP only, so the bridge asks for every remote candidate's
+IP, and again as the list grows. One relay is often enough: a client behind a
+symmetric NAT can send to the other side's relayed address directly, and the
+relay forwards to it. The relay is also the last resort: it ranks below every
+other candidate type, so when a direct path exists it is not chosen.
 
 ## Security model
 

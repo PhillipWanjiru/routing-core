@@ -13,10 +13,22 @@ minor release may change interfaces.
   permissions and channel bindings, and sends and receives peer data as
   indications or ChannelData.
 
+- `ice_turn::TurnBridge`: joins an ICE agent to a TURN client. Gathers the
+  relayed candidate, routes the agent's sends from it through the allocation,
+  unwraps what comes back (STUN to the agent, media to the caller), and keeps
+  TURN permissions in step with the peer's candidate list.
+- `Candidate::relayed`.
+- An end-to-end test: two symmetric NATs, which ICE alone cannot connect, now
+  connect through a relay, with media flowing both ways.
+
+### Fixed
+- The `Candidate` documentation gave a relayed candidate the local socket as its
+  base. A relayed candidate is its own base (RFC 8445), or its checks bypass the
+  relay and its pair is pruned as a duplicate of the host pair.
+
 ### Planned
 - UDP driver for the TURN server.
-- Relayed candidates in ICE, with an end-to-end test of two agents behind
-  symmetric NATs completing through the relay.
+- Relayed candidates in the real-socket ICE driver.
 
 ## [0.5.0] - 2026-10-26
 
