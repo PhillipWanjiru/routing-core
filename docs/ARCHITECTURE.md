@@ -44,7 +44,7 @@ what to send. Consequences:
   period, because the controlled side completes only after the controlling side
   answers its check.
 
-The ICE agent and the TURN server each have a real-socket driver; the TURN client is sans-IO too, and its driver arrives with ICE over TURN.
+The ICE agent and the TURN server each have a real-socket driver. The TURN client has none of its own: while ICE runs it is driven by the ICE driver, and `ice_turn::driver` holds the two steps that come before (allocate a relay, install permissions).
 
 ## NAT traversal
 
@@ -91,6 +91,11 @@ rather than diverted to the host socket if the allocation is gone. Data
 indications and ChannelData from the server are unwrapped: STUN payloads go to
 the agent as arriving at the relayed address, and anything else is returned as
 media.
+
+The ICE driver knows nothing about TURN. It is given a `RelayPath`, which says
+which sends to wrap and which datagrams from the relay server to unwrap, and it
+does the I/O; so `ice` does not depend on `turn`. The relay client shares a socket
+with the agent, and the server's address tells relayed traffic from direct.
 
 TURN permissions are by IP only, so the bridge asks for every remote candidate's
 IP, and again as the list grows. One relay is often enough: a client behind a

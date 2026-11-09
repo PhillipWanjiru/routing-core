@@ -33,7 +33,7 @@ the others down.
 | TURN server: authentication, allocation, permissions, ChannelBind, relay | Implemented: a sans-IO core and a UDP driver with one relay socket per allocation |
 | TURN client | Implemented (sans-IO); signed-response verification, refresh, permissions, channels |
 | ICE: gathering, pairing, checks, triggered checks, role conflicts, nomination, real-socket driver | Implemented |
-| ICE over TURN: relayed candidates, permission management, routing agent traffic through an allocation | Implemented (sans-IO); proven in simulation, including two symmetric NATs; not yet in the real-socket driver |
+| ICE over TURN: relayed candidates, permission management, routing agent traffic through an allocation | Implemented: a sans-IO bridge, proven in simulation for two symmetric NATs, and a real-socket driver, proven over loopback against a real TURN server |
 | QoS (DSCP, admission control), dynamic firewall, XDP flood mitigation, fraud detection | Planned |
 | CDR pipeline, WebRTC gateway, dashboard | Planned |
 
@@ -74,17 +74,20 @@ runs on a virtual clock.
   not the RFCs' published vectors.
 - NAT behaviour is modelled (address-restricted cone and symmetric), not
   measured on real devices.
-- The TURN server runs over real sockets, but ICE over TURN is proven in
-  simulation only, and nothing has run against a third-party TURN server or
+- ICE over TURN has run over real sockets only on loopback, with a relay-only
+  policy (loopback has no NAT to defeat the direct path). The symmetric-NAT case
+  is proven in simulation. Nothing has run against a third-party TURN server or
   client.
 
 ## Roadmap
 
-1. Relayed candidates in the real-socket ICE driver, so the relay path runs over
-   real sockets rather than only in simulation.
-2. QoS: DSCP marking, Erlang-B admission control, dynamic firewall rules.
-3. Flood mitigation and fraud detection.
-4. Observability, CDR pipeline and a WebRTC gateway.
+1. The symmetric-NAT case on a real kernel's NAT (network namespaces with
+   conntrack) rather than a model, and a bound channel for the selected relayed
+   pair.
+2. SDP candidate encoding and decoding, and real network-interface enumeration.
+3. QoS: DSCP marking, Erlang-B admission control, dynamic firewall rules.
+4. Flood mitigation and fraud detection.
+5. Observability, CDR pipeline and a WebRTC gateway.
 
 ## Development
 

@@ -12,7 +12,6 @@ minor release may change interfaces.
   challenge, believes only signed success responses, refreshes the allocation,
   permissions and channel bindings, and sends and receives peer data as
   indications or ChannelData.
-
 - `ice_turn::TurnBridge`: joins an ICE agent to a TURN client. Gathers the
   relayed candidate, routes the agent's sends from it through the allocation,
   unwraps what comes back (STUN to the agent, media to the caller), and keeps
@@ -23,8 +22,14 @@ minor release may change interfaces.
   shuts down cleanly, returning the server.
 - `TurnServer::abandon`: gives up an allocation whose relay socket could not be
   opened, so no success is sent for a relay that does not exist.
+- `ice::run_agent_relayed` and the `RelayPath` trait: the real-socket ICE driver can
+  carry an agent's traffic through a relay without knowing anything about TURN.
+  `ice_turn::TurnRelay` is the TURN implementation, and `ice_turn::driver` has
+  `allocate_relay` and `install_permissions` for the steps before ICE starts.
 - An end-to-end test: two symmetric NATs, which ICE alone cannot connect, now
   connect through a relay, with media flowing both ways.
+- A real-socket test: two agents complete ICE through a real TURN server over
+  loopback, and media flows both ways over the nominated relay path.
 
 ### Fixed
 - The `Candidate` documentation gave a relayed candidate the local socket as its
@@ -32,7 +37,8 @@ minor release may change interfaces.
   relay and its pair is pruned as a duplicate of the host pair.
 
 ### Planned
-- Relayed candidates in the real-socket ICE driver.
+- A bound channel for the selected relayed pair (ChannelData's smaller overhead).
+- A real-NAT test rig using network namespaces.
 
 ## [0.5.0] - 2026-10-26
 

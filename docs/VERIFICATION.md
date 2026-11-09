@@ -26,8 +26,9 @@ one can quietly agree with a wrong implementation.
    *negative* case: two symmetric NATs must fail, and the agents must conclude
    so rather than hang.
 5. **Real sockets.** The same state machine is driven over UDP on loopback with
-   the wall clock. The suite was run 25 times in a row (125 executions) to
-   look for timing flakiness; none.
+   the wall clock, and the TURN server and the relay path run over real UDP
+   against each other. Each real-socket suite was run 25 times in a row to look
+   for timing flakiness; none.
 6. **Mutation testing.** For each security- or timing-critical rule, the rule is
    broken on purpose and the test written for it must fail.
 7. **Smoke fuzzing.** Parsers are fed randomised and mutated inputs and must
@@ -44,6 +45,7 @@ one can quietly agree with a wrong implementation.
 | TURN client | 12 | 12 |
 | ICE over TURN: bridge rules and relayed priority | 8 | 8 |
 | TURN server UDP driver | 7 | 7 |
+| Relay-aware ICE driver and `TurnRelay` | 8 | 8 |
 
 Each count is *after* the test fixes described below; the first pass found
 weak tests in three of the four areas.

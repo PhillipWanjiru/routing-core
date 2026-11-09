@@ -25,4 +25,4 @@ pub use agent::{
     ValidPair,
 };
 pub use checklist::{CheckList, CheckListEntry, PairState};
-pub use driver::{run_agent, DriveOptions};
+pub use driver::{run_agent, run_agent_relayed, DriveOptions, RelayPath};

@@ -6,79 +6,13 @@
 //! rubbish and shuts down cleanly. Clients are the sans-IO `TurnClient` driven
 //! by a real socket, so the server is exercised the way a real client would.
 
-use nat_traversal::turn::driver::{run_turn_server, TurnDriveOptions};
-use nat_traversal::turn::{
-    CredentialStore, PortPool, TurnClient, TurnClientAction, TurnClientConfig, TurnClientEvent,
-    TurnClientStep, TurnServer,
-};
+mod common;
+
+use common::*;
+use nat_traversal::turn::{TurnClient, TurnClientAction, TurnClientConfig, TurnClientEvent, TurnClientStep};
 use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::{AtomicU16, Ordering};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
-use tokio::sync::oneshot;
-use tokio::task::JoinHandle;
-
-const REALM: &str = "routing-core.local";
-const USER: &str = "alice";
-const PASS: &str = "correcthorsebatterystaple";
-const LOOPBACK: &str = "127.0.0.1";
-
-/// Each test gets its own block of relay ports, so tests running in parallel in
-/// one process never fight over a port.
-static NEXT_PORT: AtomicU16 = AtomicU16::new(42000);
-
-fn ms(n: u64) -> Duration {
-    Duration::from_millis(n)
-}
-fn loopback() -> IpAddr {
-    LOOPBACK.parse().unwrap()
-}
-
-// ─── A server on a real socket ─────────────────────────────────────
-
-struct Server {
-    addr: SocketAddr,
-    lo: u16,
-    stop: oneshot::Sender<()>,
-    task: JoinHandle<TurnServer>,
-}
-
-async fn start(ports: u16, sweep: Duration) -> Server {
-    let lo = NEXT_PORT.fetch_add(ports, Ordering::SeqCst);
-    let hi = lo + ports - 1;
-    let mut creds = CredentialStore::new();
-    creds.add_user(USER, PASS);
-    let server = TurnServer::new(REALM, loopback(), creds, PortPool::new(lo, hi));
-
-    let control = Arc::new(UdpSocket::bind((LOOPBACK, 0)).await.unwrap());
-    let addr = control.local_addr().unwrap();
-    let (stop, shutdown) = oneshot::channel();
-    let task = tokio::spawn(run_turn_server(server, control, loopback(), TurnDriveOptions { sweep_interval: sweep }, shutdown));
-    Server { addr, lo, stop, task }
-}
-
-impl Server {
-    /// Stop serving and hand back the server's final state.
-    async fn stop(self) -> TurnServer {
-        let _ = self.stop.send(());
-        self.task.await.unwrap()
-    }
-}
-
-/// True once nothing holds `port` any more, i.e. the relay socket has closed.
-async fn becomes_free(port: u16, within: Duration) -> bool {
-    let deadline = Instant::now() + within;
-    loop {
-        if UdpSocket::bind((LOOPBACK, port)).await.is_ok() {
-            return true;
-        }
-        if Instant::now() >= deadline {
-            return false;
-        }
-        tokio::time::sleep(ms(20)).await;
-    }
-}
 
 // ─── A client: the sans-IO TurnClient on a real socket ─────────────
 

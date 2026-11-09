@@ -24,19 +24,26 @@
 //! routes the agent's actions through [`TurnBridge::route`], and feeds datagrams
 //! that arrive from the TURN server to [`TurnBridge::handle_server_datagram`].
 //!
+//! The [`driver`] submodule is the real-socket half: helpers that allocate a relay and
+//! install permissions before ICE starts. [`TurnRelay`] is what the real-socket ICE driver
+//! (`ice::run_agent_relayed`) runs while ICE is in progress.
+//!
 //! # Not covered
 //!
 //! Binding a channel for the selected pair (ChannelData's smaller overhead).
 
-use crate::ice::{Candidate, IceAction, IceAgent};
+use crate::ice::{Candidate, IceAction, IceAgent, RelayPath};
 use crate::turn::relay::{classify_datagram, DatagramKind};
 use crate::turn::{TurnClient, TurnClientAction, TurnClientConfig, TurnClientEvent, TurnClientStep};
 use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
 use std::time::Instant;
 
+pub mod driver;
+
 pub struct TurnBridge {
     client: TurnClient,
+    server: SocketAddr,
     /// Peer IPs a permission has been requested for.
     requested: HashSet<IpAddr>,
 }
@@ -64,7 +71,13 @@ pub struct Routed {
 
 impl TurnBridge {
     pub fn new(cfg: TurnClientConfig) -> Self {
-        TurnBridge { client: TurnClient::new(cfg), requested: HashSet::new() }
+        let server = cfg.server;
+        TurnBridge { client: TurnClient::new(cfg), server, requested: HashSet::new() }
+    }
+
+    /// The TURN server this bridge talks to.
+    pub fn server_addr(&self) -> SocketAddr {
+        self.server
     }
 
     pub fn client(&self) -> &TurnClient {
@@ -187,5 +200,80 @@ impl TurnBridge {
         if step.events.iter().any(|e| matches!(e, TurnClientEvent::PermissionFailed { .. })) {
             self.requested.clear();
         }
+    }
+}
+
+/// A [`TurnBridge`] bound to the local socket its allocation was made from: the
+/// form the real-socket ICE driver runs (see [`RelayPath`]).
+///
+/// While the driver runs, TURN's own events (allocation, permission results) are
+/// not reported; allocate and install permissions first, with [`driver`]'s helpers,
+/// which do report them. Media that arrives from peers during the run is kept and
+/// returned by [`TurnRelay::take_media`].
+pub struct TurnRelay {
+    bridge: TurnBridge,
+    local: SocketAddr,
+    media: Vec<(SocketAddr, Vec<u8>)>,
+}
+
+fn datagrams(step: TurnClientStep) -> Vec<Vec<u8>> {
+    step.actions.into_iter().map(|TurnClientAction::Send { data, .. }| data).collect()
+}
+
+impl TurnRelay {
+    /// `local` is the address of the socket the bridge's allocation was made from.
+    pub fn new(bridge: TurnBridge, local: SocketAddr) -> Self {
+        TurnRelay { bridge, local, media: Vec::new() }
+    }
+
+    pub fn bridge(&self) -> &TurnBridge {
+        &self.bridge
+    }
+
+    pub fn bridge_mut(&mut self) -> &mut TurnBridge {
+        &mut self.bridge
+    }
+
+    pub fn into_bridge(self) -> TurnBridge {
+        self.bridge
+    }
+
+    /// The media received so far, from the peer that sent each; empties the buffer.
+    pub fn take_media(&mut self) -> Vec<(SocketAddr, Vec<u8>)> {
+        std::mem::take(&mut self.media)
+    }
+}
+
+impl RelayPath for TurnRelay {
+    fn local_addr(&self) -> SocketAddr {
+        self.local
+    }
+
+    fn server_addr(&self) -> SocketAddr {
+        self.bridge.server_addr()
+    }
+
+    fn route(&mut self, actions: Vec<IceAction>) -> (Vec<Vec<u8>>, Vec<IceAction>) {
+        let routed = self.bridge.route(actions);
+        let wrapped = routed.via_turn.into_iter().map(|TurnClientAction::Send { data, .. }| data).collect();
+        (wrapped, routed.direct)
+    }
+
+    fn on_server_datagram(&mut self, agent: &mut IceAgent, raw: &[u8], now: Instant) -> (Vec<Vec<u8>>, Vec<IceAction>) {
+        let server = self.bridge.server_addr();
+        let inbound = self.bridge.handle_server_datagram(Some(agent), server, raw, now);
+        self.media.extend(inbound.app);
+        (datagrams(inbound.turn), inbound.ice)
+    }
+
+    fn poll(&mut self, agent: &IceAgent, now: Instant) -> Vec<Vec<u8>> {
+        let mut out = datagrams(self.bridge.poll(now));
+        // A peer-reflexive candidate learned from a check adds to the list.
+        out.extend(datagrams(self.bridge.sync_permissions(agent.remote_candidates(), now)));
+        out
+    }
+
+    fn next_wakeup(&self) -> Option<Instant> {
+        self.bridge.next_wakeup()
     }
 }
