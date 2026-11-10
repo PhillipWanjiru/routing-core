@@ -40,6 +40,17 @@ minor release may change interfaces.
   default.
 - `ice::sdp::wire_foundation`. The foundations this crate computes (`Host-192.168.1.10`)
   are readable but not valid SDP, so they are written as a stable hash.
+- `ice::interfaces`: finding the host's own addresses. `enumerate_interfaces` lists them
+  through `getifaddrs`; `select_host_addresses` decides which become host candidates
+  (up and running, not loopback, not link-local, never unspecified, multicast or
+  IPv4-mapped, each address once) and gives each a distinct local preference, IPv6 first;
+  `bind_host_sockets` and `gather_host_sockets` bind a socket for each. An address that
+  cannot be bound is skipped rather than failing the gather.
+- `unsafe` is now denied across the crate. The one exception is the `getifaddrs` wrapper,
+  and a test checks that nothing else opts back in.
+
+### Changed
+- The `nat-traversal` binary uses the library crate instead of recompiling its modules.
 
 ### Fixed
 - The `Candidate` documentation gave a relayed candidate the local socket as its

@@ -16,9 +16,9 @@
 //!   cargo run -p nat-traversal
 //!   (separate terminal) tcpdump -i lo -w phase4_stun.pcap 'udp port 3478'
 
-pub mod ice;
-pub mod stun;
-pub mod turn;
+#![deny(unsafe_code)]
+
+use nat_traversal::{stun, turn};
 
 use stun::{
     attributes::{decode_attributes, Attribute},

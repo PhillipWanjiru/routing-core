@@ -34,6 +34,18 @@ verified, and any known gap it leaves.
 - Cite the RFC section for protocol rules, and flag any constant recalled from
   memory rather than checked against the text.
 
+## Unsafe code
+
+`unsafe` is denied across the `nat-traversal` crate (`#![deny(unsafe_code)]`). The one
+exception is the `getifaddrs` wrapper in `ice/interfaces.rs`, which opts back in for that
+single function. A test fails if any other file uses `unsafe` or turns the lint off, because
+the compiler alone would not stop the second. If you need `unsafe` elsewhere, raise it
+first: the answer is almost always a different design. Where it is justified, keep it to the
+smallest function that can hold it, write a `# Safety` section stating exactly what the
+caller must guarantee, put a `SAFETY:` comment on every block saying why it holds, and test
+it with inputs built by hand, since the real operating system only ever hands back
+well-formed data.
+
 ## Changelog
 
 User-visible changes go under `Unreleased` in [CHANGELOG.md](CHANGELOG.md).

@@ -34,6 +34,7 @@ the others down.
 | TURN client | Implemented (sans-IO); signed-response verification, refresh, permissions, channels |
 | ICE: gathering, pairing, checks, triggered checks, role conflicts, nomination, real-socket driver | Implemented |
 | ICE over TURN: relayed candidates, permission management, routing agent traffic through an allocation | Implemented: a sans-IO bridge, proven in simulation for two symmetric NATs, and a real-socket driver, proven over loopback against a real TURN server |
+| Host candidate discovery: listing the machine's addresses (`getifaddrs`), a selection policy, and binding a socket for each | Implemented for Unix. The selection rules are pure and tested with synthetic data; the one `unsafe` function is unit-tested with hand-built address structures |
 | SDP candidate attributes (RFC 8839): `a=candidate`, `a=ice-ufrag`, `a=ice-pwd`; decode and encode | Implemented: a strict decoder that skips what it cannot use, an injection-safe encoder, checked against an independent oracle; not yet connected to the SIP offer/answer layer |
 | QoS (DSCP, admission control), dynamic firewall, XDP flood mitigation, fraud detection | Planned |
 | CDR pipeline, WebRTC gateway, dashboard | Planned |
@@ -75,6 +76,12 @@ runs on a virtual clock.
   not the RFCs' published vectors.
 - NAT behaviour is modelled (address-restricted cone and symmetric), not
   measured on real devices.
+- Interface enumeration is Unix-only (other platforms get an error), and IPv6
+  link-local addresses are never bound because a candidate carries no scope id.
+  The IPv6 branch of the interface parser is verified with hand-built address
+  structures; it was developed on a machine with no live IPv6 interface.
+- `unsafe` is denied across the crate. One function, the interface lister, opts
+  back in; a test checks that nothing else does.
 - SDP: TCP candidates are not supported, and mDNS hostnames are skipped, never
   resolved. The codec is not yet connected to `voip-sip`'s offer/answer handling.
 - ICE over TURN has run over real sockets only on loopback, with a relay-only
@@ -87,8 +94,8 @@ runs on a virtual clock.
 1. The symmetric-NAT case on a real kernel's NAT (network namespaces with
    conntrack) rather than a model, and a bound channel for the selected relayed
    pair.
-2. Real network-interface enumeration, and connecting the SDP codec to the SIP
-   offer/answer layer.
+2. Connecting the SDP codec and host-candidate discovery to the SIP offer/answer
+   layer.
 3. QoS: DSCP marking, Erlang-B admission control, dynamic firewall rules.
 4. Flood mitigation and fraud detection.
 5. Observability, CDR pipeline and a WebRTC gateway.

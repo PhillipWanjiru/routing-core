@@ -6,6 +6,7 @@ pub mod check_msg;
 pub mod checklist;
 pub mod driver;
 pub mod gather;
+pub mod interfaces;
 pub mod pair;
 pub mod random;
 pub mod sdp;

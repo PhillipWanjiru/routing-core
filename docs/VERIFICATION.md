@@ -55,6 +55,7 @@ one can quietly agree with a wrong implementation.
 | TURN server UDP driver | 7 | 7 |
 | Relay-aware ICE driver and `TurnRelay` | 8 | 8 |
 | SDP codec (`ice::sdp`) | 17 | 17 |
+| Interface discovery: selection, the `getifaddrs` parser, gathering | 18 | 18 |
 
 Each count is *after* the test fixes described below; the first pass found
 weak tests in three of the four areas.
@@ -96,12 +97,21 @@ Writing the SDP encoder found another: the foundations the ICE layer computes
 allows only letters, digits, `+` and `/`, at most 32. Encoding them as they stood
 would have produced descriptions a browser rejects.
 
+The first test written for the one `unsafe` function, a `sockaddr` at a misaligned
+address, failed. The function read the address family with a plain dereference, which
+assumes alignment, while reading everything else unaligned. The operating system always
+returns aligned memory, so no test against the real machine could ever have found it;
+the safety contract now says what it requires and every read is unaligned.
+
 ## What is not verified
 
 - **Interoperability.** The oracle is this project's own reading of the RFCs,
   not an independent stack. Testing against a third-party ICE/TURN/SIP
   implementation is still to do.
 - **Real NATs.** The models are simplifications.
+- **A live IPv6 interface.** The interface parser's IPv6 branch is checked with
+  hand-built address structures, because the machine it was developed on had no IPv6
+  interface. A dual-stack machine exercises it for real.
 - **Coverage-guided fuzzing**, which needs a nightly toolchain.
 - **Recalled constants.** Attribute and error-code numbers recalled from memory
   rather than checked against the RFC text are flagged where they are defined.

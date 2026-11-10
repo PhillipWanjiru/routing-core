@@ -167,6 +167,7 @@ name = "nat-traversal"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "libc",
  "nom",
  "routing-core",
  "tokio",

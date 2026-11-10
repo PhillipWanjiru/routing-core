@@ -119,6 +119,19 @@ so a foundation, ufrag or password cannot add lines to a description. It hides t
 related address (`raddr`/`rport`) by default, as browsers do, since for a
 server-reflexive candidate that address is the host's own.
 
+### Host addresses
+
+Finding the machine's own addresses is split in two. Choosing which become candidates is
+pure: `select_host_addresses` takes a list of interface addresses and a policy, and does no
+I/O, so every rule is tested with synthetic data. Asking the operating system for the list
+is one small `unsafe` function over `getifaddrs`, kept as thin as it can be: it turns the C
+list into owned Rust values and frees it on every path out.
+
+By default an address is offered only if its interface is up and has a link, and it is
+neither loopback nor link-local, and never unspecified, multicast or IPv4-mapped. Each
+address is offered once, with a distinct local preference counting down from 65535, native
+IPv6 first, so that check order is deterministic (RFC 8445 §5.1.2.2).
+
 ## Security model
 
 | Layer | Mechanism |
