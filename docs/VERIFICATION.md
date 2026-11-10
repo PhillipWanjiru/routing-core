@@ -16,7 +16,15 @@ one can quietly agree with a wrong implementation.
    Rust builders must reproduce them byte-for-byte and the validators must
    accept them. This is how the MESSAGE-INTEGRITY "adjusted length" trap — the
    most common STUN/TURN interoperability bug — was checked in both the build
-   and verify directions.
+   and verify directions. The SDP codec got a stricter form of this: a separate
+   Python implementation of the RFC 8839 grammar was run against about 25,000
+   generated lines (valid, unsupported, malformed and byte-mutated) and 4,000
+   encoder specs with no disagreement, and its verdicts on 76 decode cases and
+   27 encode cases are embedded as fixtures. One limit worth knowing: for its
+   whitespace rule the oracle was at first aligned with Rust's own `trim`, so it
+   could not have caught the decision that Unicode line separators count as
+   padding. A hand-written test did, and the oracle now states the intended
+   ASCII-only policy independently.
 3. **Exhaustive properties.** Every single-bit flip is detected by CRC-32 and by
    the HMAC, over every bit of every byte of a message; every role and
    tie-breaker combination ends with exactly one controlling agent.
@@ -46,6 +54,7 @@ one can quietly agree with a wrong implementation.
 | ICE over TURN: bridge rules and relayed priority | 8 | 8 |
 | TURN server UDP driver | 7 | 7 |
 | Relay-aware ICE driver and `TurnRelay` | 8 | 8 |
+| SDP codec (`ice::sdp`) | 17 | 17 |
 
 Each count is *after* the test fixes described below; the first pass found
 weak tests in three of the four areas.
@@ -81,6 +90,11 @@ Reading the ICE candidate documentation found a further error before any relay
 code was written: it gave a relayed candidate the local socket as its base, which
 would have sent its checks around the relay and pruned the relayed pair as a
 duplicate of the host pair. A regression test reproduces the pruning.
+
+Writing the SDP encoder found another: the foundations the ICE layer computes
+(`Host-192.168.1.10`, and for IPv6 up to 55 characters) are not valid SDP, which
+allows only letters, digits, `+` and `/`, at most 32. Encoding them as they stood
+would have produced descriptions a browser rejects.
 
 ## What is not verified
 

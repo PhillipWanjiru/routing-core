@@ -30,6 +30,16 @@ minor release may change interfaces.
   connect through a relay, with media flowing both ways.
 - A real-socket test: two agents complete ICE through a real TURN server over
   loopback, and media flows both ways over the nominated relay path.
+- `ice::sdp`: the text form of ICE (RFC 8839). `decode_candidate` and `encode_candidate`
+  for `a=candidate`, and `parse_ice_attributes` and `format_ice_attributes` for a whole
+  description including `ice-ufrag`, `ice-pwd`, `ice-options`, `ice-lite` and
+  `end-of-candidates`. The decoder is strict: a malformed line is an error, while a
+  well-formed one it cannot use (TCP, an mDNS hostname, an unknown type) is skipped and
+  counted. Hostnames are never resolved. The encoder validates every field it writes, so
+  nothing can inject lines into a description, and it hides the related address by
+  default.
+- `ice::sdp::wire_foundation`. The foundations this crate computes (`Host-192.168.1.10`)
+  are readable but not valid SDP, so they are written as a stable hash.
 
 ### Fixed
 - The `Candidate` documentation gave a relayed candidate the local socket as its

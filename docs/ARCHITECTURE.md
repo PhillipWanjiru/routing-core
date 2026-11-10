@@ -103,6 +103,22 @@ symmetric NAT can send to the other side's relayed address directly, and the
 relay forwards to it. The relay is also the last resort: it ranks below every
 other candidate type, so when a direct path exists it is not chosen.
 
+### SDP
+
+`ice::sdp` is where attacker-controlled text becomes candidates, and it is written
+to that standard. The decoder refuses what is malformed and never guesses; it skips,
+and counts, what is well-formed but unusable here (TCP, unknown types, hostnames),
+because a receiver must not fail a whole negotiation over one exotic candidate.
+It never resolves a hostname: browsers send mDNS names, and resolving one named by
+the other end of a call would make the parser a network client for the attacker.
+Only ASCII padding is tolerated, because Unicode line separators are line breaks to
+some parsers and treating them as padding would be a parser differential.
+
+The encoder is held to the mirror-image rule: every field it writes is validated,
+so a foundation, ufrag or password cannot add lines to a description. It hides the
+related address (`raddr`/`rport`) by default, as browsers do, since for a
+server-reflexive candidate that address is the host's own.
+
 ## Security model
 
 | Layer | Mechanism |

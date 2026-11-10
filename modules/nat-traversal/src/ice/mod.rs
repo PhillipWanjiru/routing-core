@@ -8,6 +8,7 @@ pub mod driver;
 pub mod gather;
 pub mod pair;
 pub mod random;
+pub mod sdp;
 
 pub use candidate::{Candidate, CandidateType};
 pub use gather::{
