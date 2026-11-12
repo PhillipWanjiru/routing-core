@@ -53,6 +53,11 @@ minor release may change interfaces.
 - The `nat-traversal` binary uses the library crate instead of recompiling its modules.
 
 ### Fixed
+- Randomness for ICE and TURN (transaction IDs, tie-breakers) no longer falls back to a
+  predictable generator when `/dev/urandom` cannot be read. It used to, silently, and the
+  likeliest trigger was running out of file descriptors, since every call opened the device
+  afresh. The device is now opened once and kept; `try_random_bytes` returns the error and
+  `random_bytes` refuses to continue. `weak_fallback_bytes` is removed.
 - The `Candidate` documentation gave a relayed candidate the local socket as its
   base. A relayed candidate is its own base (RFC 8445), or its checks bypass the
   relay and its pair is pruned as a duplicate of the host pair.

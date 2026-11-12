@@ -2,7 +2,7 @@
 //! the small additions this slice made to `Candidate` and `CandidatePair`, and
 //! the randomness source.
 
-use nat_traversal::ice::random::{random_bytes, random_u64, weak_fallback_bytes};
+use nat_traversal::ice::random::{random_bytes, random_u64, try_random_bytes};
 use nat_traversal::ice::{
     form_candidate_pairs, Candidate, CandidatePair, CandidateType, CheckList, IceRole, PairState,
 };
@@ -348,10 +348,8 @@ fn random_u64_draws_are_all_distinct() {
 }
 
 #[test]
-fn weak_fallback_fills_any_length_and_differs_across_calls() {
-    assert_ne!(weak_fallback_bytes::<12>(), weak_fallback_bytes::<12>());
-    // Lengths that are not a multiple of 8 exercise the partial final chunk.
-    assert_eq!(weak_fallback_bytes::<1>().len(), 1);
-    assert_eq!(weak_fallback_bytes::<9>().len(), 9);
-    assert_eq!(weak_fallback_bytes::<33>().len(), 33);
+fn the_fallible_form_agrees_with_the_infallible_one() {
+    // Same source, same length: the error path exists for callers that can refuse the work.
+    assert_eq!(try_random_bytes::<12>().unwrap().len(), 12);
+    assert_ne!(try_random_bytes::<16>().unwrap(), try_random_bytes::<16>().unwrap());
 }

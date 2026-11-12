@@ -139,7 +139,7 @@ IPv6 first, so that check order is deterministic (RFC 8445 §5.1.2.2).
 | TURN control messages | Long-term credentials; success responses are signed so a client can reject a forged one |
 | ICE connectivity checks | Short-term credentials (the ICE password); FINGERPRINT is only a checksum, never trusted for security |
 | TURN data path | No per-packet authentication, by design of the protocol, so the **permission table is the only barrier** between a relay and an open proxy |
-| Transaction IDs | OS CSPRNG: an unsigned error response is guarded by nothing else |
+| Transaction IDs | OS CSPRNG, with no fallback: if it cannot be read the process refuses to continue. An unsigned error response is guarded by nothing else |
 
 Rules the code holds to:
 

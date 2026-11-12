@@ -103,6 +103,14 @@ assumes alignment, while reading everything else unaligned. The operating system
 returns aligned memory, so no test against the real machine could ever have found it;
 the safety contract now says what it requires and every read is unaligned.
 
+Writing credential generation meant reading the randomness module, which had a documented
+but silent weakness: if `/dev/urandom` could not be read it fell back to a predictable
+generator, with nothing to tell anyone. The likeliest trigger was running out of file
+descriptors, because every call opened the device afresh, which is what a flooded server
+experiences. The architecture's security table claimed transaction IDs come from the OS
+CSPRNG, which was true only until the source failed. It now fails closed, and the test that
+pins it exhausts the process's descriptors, which the old per-call open could not survive.
+
 ## What is not verified
 
 - **Interoperability.** The oracle is this project's own reading of the RFCs,
