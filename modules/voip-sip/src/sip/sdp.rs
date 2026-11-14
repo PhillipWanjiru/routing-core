@@ -5,6 +5,9 @@
 //! - Media descriptions (m= lines) — port, protocol, payload types
 //! - Attributes (a= lines) — rtpmap, fmtp, crypto, ICE candidates
 //!
+//! ICE attributes are read through [`SdpSession::ice_description`], which applies RFC 8839's
+//! session-level inheritance and validates candidates with the strict `nat-traversal` codec.
+//!
 //! The parser is line-oriented (one type=value per line, CRLF or LF).
 //! Unknown line types are silently skipped, per RFC 4566 §5.
 
@@ -13,6 +16,8 @@
 pub struct SdpSession {
     /// Session-level connection address (overridden by per-media c= lines).
     pub connection: Option<ConnectionData>,
+    /// Raw session-level a= attributes: those before the first m= line.
+    pub attributes: Vec<(String, Option<String>)>,
     /// Zero or more media descriptions.
     pub media: Vec<MediaDescription>,
 }
@@ -81,6 +86,76 @@ impl MediaDescription {
     }
 }
 
+// ─── ICE ──────────────────────────────────────────────────────
+
+/// Why a media section's ICE attributes could not be read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IceSdpError {
+    /// There is no media section with that index.
+    NoSuchMedia(usize),
+    /// A candidate at session level. Candidates belong to a media section (RFC 8839 §5.1);
+    /// accepting one here would mean guessing which stream it is for.
+    CandidateAtSessionLevel,
+    /// The ICE codec refused an attribute.
+    Ice(nat_traversal::ice::sdp::SdpError),
+}
+
+impl std::fmt::Display for IceSdpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IceSdpError::NoSuchMedia(i) => write!(f, "no media section {i}"),
+            IceSdpError::CandidateAtSessionLevel => write!(f, "a candidate at session level"),
+            IceSdpError::Ice(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for IceSdpError {}
+
+const ICE_ATTRIBUTES: [&str; 6] = ["ice-ufrag", "ice-pwd", "ice-options", "ice-lite", "end-of-candidates", "candidate"];
+
+/// The ICE attributes among `attrs`, as the text the ICE codec reads.
+fn ice_text(attrs: &[(String, Option<String>)]) -> String {
+    let mut out = String::new();
+    for (name, value) in attrs {
+        if let Some(canonical) = ICE_ATTRIBUTES.iter().find(|n| n.eq_ignore_ascii_case(name)) {
+            match value {
+                Some(v) => out.push_str(&format!("a={canonical}:{v}\r\n")),
+                None => out.push_str(&format!("a={canonical}\r\n")),
+            }
+        }
+    }
+    out
+}
+
+impl SdpSession {
+    /// The ICE attributes that apply to media section `media_index` (RFC 8839 §5).
+    ///
+    /// `ice-ufrag` and `ice-pwd` may appear at session level and apply to every media
+    /// section that does not set its own; a media-level one wins. `ice-lite` is a session
+    /// property, but a stack that puts it on a media section is read as lite too, which
+    /// only makes this side controlling. Candidates are media-level only. The result has
+    /// no credentials if the section does not use ICE.
+    pub fn ice_description(&self, media_index: usize) -> Result<nat_traversal::ice::sdp::IceDescription, IceSdpError> {
+        use nat_traversal::ice::sdp::{parse_ice_attributes, IceDescription};
+        let media = self.media.get(media_index).ok_or(IceSdpError::NoSuchMedia(media_index))?;
+        let session = parse_ice_attributes(&ice_text(&self.attributes)).map_err(IceSdpError::Ice)?;
+        if !session.candidates.is_empty() || !session.skipped.is_empty() {
+            return Err(IceSdpError::CandidateAtSessionLevel);
+        }
+        let m = parse_ice_attributes(&ice_text(&media.attributes)).map_err(IceSdpError::Ice)?;
+        Ok(IceDescription {
+            ufrag: m.ufrag.or(session.ufrag),
+            pwd: m.pwd.or(session.pwd),
+            lite: session.lite || m.lite,
+            trickle: session.trickle || m.trickle,
+            end_of_candidates: session.end_of_candidates || m.end_of_candidates,
+            candidates: m.candidates,
+            skipped: m.skipped,
+        })
+    }
+}
+
 // ─── Parser ───────────────────────────────────────────────────
 
 /// Parse an SDP body (bytes) into an SdpSession.
@@ -130,7 +205,7 @@ pub fn parse_sdp(input: &[u8]) -> Result<SdpSession, SdpError> {
                 let (name, val) = parse_attribute(value);
                 match current_media {
                     Some(ref mut m) => m.attributes.push((name, val)),
-                    None            => { /* session-level attr — ignore for now */ }
+                    None            => session.attributes.push((name, val)),
                 }
             }
 

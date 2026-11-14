@@ -134,6 +134,22 @@ pub struct IceCredentials {
     pub password: String,
 }
 
+impl IceCredentials {
+    /// Fresh credentials from the operating system's CSPRNG: an 8-character ufrag (48 bits)
+    /// and a 24-character password (144 bits), over the 64 ICE characters. RFC 8839 asks for
+    /// at least 24 and 128 bits. The password keys every connectivity check, so an error
+    /// here (no randomness available) must stop the call being set up, not be papered over.
+    ///
+    /// Each character is the low six bits of a random byte; 256 is a multiple of 64, so
+    /// every character is equally likely, with no modulo bias.
+    pub fn generate() -> std::io::Result<Self> {
+        const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let bytes = super::random::try_random_bytes::<32>()?;
+        let text = |b: &[u8]| -> String { b.iter().map(|x| ALPHABET[usize::from(x & 63)] as char).collect() };
+        Ok(IceCredentials { ufrag: text(&bytes[..8]), password: text(&bytes[8..]) })
+    }
+}
+
 /// What the caller must do on the agent's behalf.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IceAction {

@@ -15,10 +15,7 @@
 //!   (separate terminal) tcpdump -i lo -w phase3_call.pcap \
 //!       'port 5060 or port 5080 or portrange 40000-40010'
 
-pub mod codec;
-pub mod rtp;
-pub mod sip;
-pub mod srtp;
+use voip_sip::{codec, rtp, sip, srtp};
 
 use sip::{
     builder::{self, gen_branch, gen_call_id, gen_tag, RequestParts},

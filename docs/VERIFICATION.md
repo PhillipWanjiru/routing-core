@@ -56,6 +56,9 @@ one can quietly agree with a wrong implementation.
 | Relay-aware ICE driver and `TurnRelay` | 8 | 8 |
 | SDP codec (`ice::sdp`) | 17 | 17 |
 | Interface discovery: selection, the `getifaddrs` parser, gathering | 18 | 18 |
+| Randomness: no fallback, held handle | 4 | 4 |
+| SIP-side ICE: parsing, roles, default candidate, SDP writer | 32 | 32 |
+| ICE credential generation | 3 | 3 |
 
 Each count is *after* the test fixes described below; the first pass found
 weak tests in three of the four areas.
@@ -111,11 +114,17 @@ experiences. The architecture's security table claimed transaction IDs come from
 CSPRNG, which was true only until the source failed. It now fails closed, and the test that
 pins it exhausts the process's descriptors, which the old per-call open could not survive.
 
+The SIP side's SDP parser dropped every attribute before the first `m=` line. Nothing had
+noticed, because nothing read ICE from it; the first test of session-level credentials
+failed. A legal ICE offer with its credentials at session level looked as if it had none.
+
 ## What is not verified
 
 - **Interoperability.** The oracle is this project's own reading of the RFCs,
   not an independent stack. Testing against a third-party ICE/TURN/SIP
   implementation is still to do.
+- **Real offers.** The browser, Firefox and SIP-stack SDP bodies in the tests were written
+  from memory of what those send, not captured from them.
 - **Real NATs.** The models are simplifications.
 - **A live IPv6 interface.** The interface parser's IPv6 branch is checked with
   hand-built address structures, because the machine it was developed on had no IPv6

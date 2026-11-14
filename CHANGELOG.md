@@ -48,11 +48,26 @@ minor release may change interfaces.
   cannot be bound is skipped rather than failing the gather.
 - `unsafe` is now denied across the crate. The one exception is the `getifaddrs` wrapper,
   and a test checks that nothing else opts back in.
+- `voip_sip::nat::ice`: the SIP side's decisions about ICE. `role_for` (RFC 8445 §6.1.1),
+  `default_candidate` (relayed, then reflexive, then host; component 1 only) and
+  `check_remote`.
+- `voip_sip::sip::sdp_builder`: writes SDP offers and answers with ICE. The `m=` and `c=`
+  lines carry the default candidate, and every value written is validated, so nothing can
+  add lines to a description.
+- `SdpSession::ice_description`: a media section's ICE attributes with RFC 8839's
+  session-level inheritance, candidates checked by the strict codec.
+- `IceCredentials::generate`: a random ufrag (48 bits) and password (144 bits).
 
 ### Changed
-- The `nat-traversal` binary uses the library crate instead of recompiling its modules.
+- The `nat-traversal` and `voip-sip` binaries use their library crates instead of recompiling
+  the modules.
+- `voip-sip` depends on `nat-traversal`: the client side of NAT traversal is linked into the
+  media endpoint rather than reached over the IPC bus (see ARCHITECTURE).
 
 ### Fixed
+- The SDP parser dropped every attribute before the first `m=` line, so an offer with its
+  `ice-ufrag` and `ice-pwd` at session level, which RFC 8839 allows, looked as if it had no
+  ICE credentials.
 - Randomness for ICE and TURN (transaction IDs, tie-breakers) no longer falls back to a
   predictable generator when `/dev/urandom` cannot be read. It used to, silently, and the
   likeliest trigger was running out of file descriptors, since every call opened the device

@@ -9,6 +9,7 @@ pub mod parser;
 pub mod proxy;
 pub mod registrar;
 pub mod sdp;
+pub mod sdp_builder;
 pub mod transaction;
 pub mod uas;
 

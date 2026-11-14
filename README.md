@@ -35,7 +35,8 @@ the others down.
 | ICE: gathering, pairing, checks, triggered checks, role conflicts, nomination, real-socket driver | Implemented |
 | ICE over TURN: relayed candidates, permission management, routing agent traffic through an allocation | Implemented: a sans-IO bridge, proven in simulation for two symmetric NATs, and a real-socket driver, proven over loopback against a real TURN server |
 | Host candidate discovery: listing the machine's addresses (`getifaddrs`), a selection policy, and binding a socket for each | Implemented for Unix. The selection rules are pure and tested with synthetic data; the one `unsafe` function is unit-tested with hand-built address structures |
-| SDP candidate attributes (RFC 8839): `a=candidate`, `a=ice-ufrag`, `a=ice-pwd`; decode and encode | Implemented: a strict decoder that skips what it cannot use, an injection-safe encoder, checked against an independent oracle; not yet connected to the SIP offer/answer layer |
+| SDP candidate attributes (RFC 8839): `a=candidate`, `a=ice-ufrag`, `a=ice-pwd`; decode and encode | Implemented: a strict decoder that skips what it cannot use, an injection-safe encoder, checked against an independent oracle; used by the SIP layer as below |
+| ICE in SIP offer/answer (`voip_sip::nat::ice`, `sip::sdp`, `sip::sdp_builder`): reading ICE from an SDP with RFC 8839's session-level inheritance, writing offers and answers with ICE, roles, the default candidate, credential generation | Implemented as a library layer, exercised end to end over real sockets; not yet called from the UAS, which still answers every INVITE with a fixed SDP |
 | QoS (DSCP, admission control), dynamic firewall, XDP flood mitigation, fraud detection | Planned |
 | CDR pipeline, WebRTC gateway, dashboard | Planned |
 
@@ -83,7 +84,7 @@ runs on a virtual clock.
 - `unsafe` is denied across the crate. One function, the interface lister, opts
   back in; a test checks that nothing else does.
 - SDP: TCP candidates are not supported, and mDNS hostnames are skipped, never
-  resolved. The codec is not yet connected to `voip-sip`'s offer/answer handling.
+  resolved. The UAS does not yet use the SDP layer: it still answers every INVITE with a fixed SDP.
 - ICE over TURN has run over real sockets only on loopback, with a relay-only
   policy (loopback has no NAT to defeat the direct path). The symmetric-NAT case
   is proven in simulation. Nothing has run against a third-party TURN server or
@@ -94,8 +95,8 @@ runs on a virtual clock.
 1. The symmetric-NAT case on a real kernel's NAT (network namespaces with
    conntrack) rather than a model, and a bound channel for the selected relayed
    pair.
-2. Connecting the SDP codec and host-candidate discovery to the SIP offer/answer
-   layer.
+2. Calling the ICE layer from the UAS: an agent per call, an answer with ICE, and
+   RTP bound to the selected pair.
 3. QoS: DSCP marking, Erlang-B admission control, dynamic firewall rules.
 4. Flood mitigation and fraud detection.
 5. Observability, CDR pipeline and a WebRTC gateway.

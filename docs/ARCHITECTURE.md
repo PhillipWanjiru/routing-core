@@ -132,6 +132,21 @@ neither loopback nor link-local, and never unspecified, multicast or IPv4-mapped
 address is offered once, with a distinct local preference counting down from 65535, native
 IPv6 first, so that check order is deterministic (RFC 8445 §5.1.2.2).
 
+### Where NAT traversal lives
+
+The `nat-traversal` crate holds two different kinds of thing. Its STUN and TURN *servers*
+are network services and belong in a supervised process. Its ICE agent, TURN client, SDP
+codec and interface discovery are the client side of a media endpoint, so they are linked
+into whatever terminates the call, which today is `voip-sip` (`voip_sip::nat`). ICE traffic
+never crosses the IPC bus.
+
+That was a choice between two designs. The bus carries control-plane messages between
+processes (registration, health, call setup, routing, firewall commands). Today it is a
+registration and heartbeat hub: it reads frames but does not yet route messages between
+modules, so there is nothing for candidates to travel on even if they should. And ICE is not
+control-plane: it is per-call client logic that needs the call's sockets and clock, which is
+what a library is for. Process isolation is kept where it pays: the servers.
+
 ## Security model
 
 | Layer | Mechanism |
