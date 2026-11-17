@@ -6,8 +6,9 @@
 //! which is what the driver adds. The timers are short so the tests are quick,
 //! but nothing is simulated.
 
+use nat_traversal::ice::interfaces::{bind_host_sockets_now, gather_host_sockets_now, HostAddress, HostPolicy};
 use nat_traversal::ice::{
-    random_tie_breaker, run_agent, Candidate, CandidateType, ChecklistState, DriveOptions, IceAgent,
+    random_tie_breaker, run_agent, run_agent_observed, Candidate, CandidateType, ChecklistState, DriveOptions, IceAgent,
     IceConfig, IceCredentials, IceRole, Nomination,
 };
 use std::net::SocketAddr;
@@ -179,4 +180,100 @@ async fn an_agent_reports_failure_when_nobody_answers() {
     assert_eq!(a.state(), ChecklistState::Failed);
     assert!(a.selected_pair().is_none());
     assert!(started.elapsed() < Duration::from_secs(2), "the driver must notice failure, not wait out its timeout");
+}
+
+// ─── Cancelling a run, and watching one ────────────────────────────
+
+/// True once nothing holds `addr` any more: the socket has really been closed.
+async fn becomes_free(addr: SocketAddr, within: Duration) -> bool {
+    let deadline = Instant::now() + within;
+    loop {
+        if UdpSocket::bind(addr).await.is_ok() {
+            return true;
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(ms(20)).await;
+    }
+}
+
+#[tokio::test]
+async fn cancelling_a_run_closes_its_sockets() {
+    // A call's ICE session ends by aborting its task. A run that leaves its socket readers
+    // behind would hold every one of that call's UDP ports open until a stray packet
+    // arrived, so a busy UAS would leak ports on every hang-up.
+    let (sock, addr) = bound().await;
+    let peer = dead_addr().await;
+    let mut agent = IceAgent::new(fast(), IceRole::Controlling, random_tie_breaker(), creds("a"), creds("b"), vec![host(addr, 65535)], vec![host(peer, 65535)], Instant::now());
+    let socks = [Arc::clone(&sock)];
+    let task = tokio::spawn(async move { run_agent(&mut agent, &socks, DriveOptions { timeout: Duration::from_secs(60), linger: Duration::from_secs(60) }).await });
+    tokio::time::sleep(ms(100)).await;
+    drop(sock);
+    assert!(!becomes_free(addr, ms(100)).await, "setup: the run is holding the port");
+
+    task.abort();
+    let _ = task.await;
+    assert!(becomes_free(addr, Duration::from_secs(2)).await, "an aborted run must close its sockets");
+}
+
+#[tokio::test]
+async fn an_observer_sees_progress_while_the_run_is_still_going() {
+    let (sa, aa) = bound().await;
+    let (sb, ab) = bound().await;
+    let mut a = IceAgent::new(fast(), IceRole::Controlling, 100, creds("a"), creds("b"), vec![host(aa, 65535)], vec![host(ab, 65535)], Instant::now());
+    let mut b = IceAgent::new(fast(), IceRole::Controlled, 50, creds("b"), creds("a"), vec![host(ab, 65535)], vec![host(aa, 65535)], Instant::now());
+    let started = Instant::now();
+    let mut seen: Vec<(ChecklistState, Duration)> = Vec::new();
+    let mut observe = |ag: &IceAgent| {
+        if seen.last().map(|(s, _)| *s) != Some(ag.state()) {
+            seen.push((ag.state(), started.elapsed()));
+        }
+    };
+    let (socks_a, socks_b) = ([sa], [sb]);
+    let long = DriveOptions { timeout: Duration::from_secs(10), linger: Duration::from_secs(1) };
+    let (ra, rb) = tokio::join!(run_agent_observed(&mut a, &socks_a, long, &mut observe), run_agent(&mut b, &socks_b, long));
+    let ended = started.elapsed();
+
+    assert_eq!((ra, rb), (ChecklistState::Completed, ChecklistState::Completed));
+    let states: Vec<ChecklistState> = seen.iter().map(|(s, _)| *s).collect();
+    assert_eq!(states, vec![ChecklistState::Running, ChecklistState::Completed]);
+    assert_eq!(states.last().copied(), Some(ra), "the last thing observed is what the run returns: no state change goes unseen");
+    let completed_at = seen[1].1;
+    assert!(ended - completed_at >= ms(800), "it must be seen as it happens ({completed_at:?}), not only when the run ends ({ended:?}, after a 1s linger)");
+}
+
+// ─── The synchronous bind ──────────────────────────────────────────
+
+#[tokio::test]
+async fn the_synchronous_gather_agrees_with_what_the_interfaces_offer() {
+    let policy = HostPolicy { include_loopback: true, ..HostPolicy::default() };
+    let sockets = gather_host_sockets_now(&policy).unwrap();
+    assert!(!sockets.is_empty());
+    for s in &sockets {
+        assert_eq!(s.socket.local_addr().unwrap(), s.candidate.transport_addr);
+        assert_ne!(s.candidate.transport_addr.port(), 0);
+    }
+}
+
+#[tokio::test]
+async fn a_socket_from_the_synchronous_bind_is_in_non_blocking_mode() {
+    // tokio waits for readiness before it reads, so a socket left in blocking mode behaves
+    // until the day a wakeup is spurious and a read blocks the whole runtime thread. So ask
+    // the kernel directly: take the socket back out of tokio, give it a read timeout, and see
+    // whether a read with nothing waiting returns at once (non-blocking) or waits out the timeout.
+    let mut sockets = bind_host_sockets_now(&[HostAddress { ip: "127.0.0.1".parse().unwrap(), interface: "lo".into(), local_preference: 65535 }]);
+    let std_socket = Arc::try_unwrap(sockets.remove(0).socket).expect("the only owner").into_std().unwrap();
+    std_socket.set_read_timeout(Some(ms(400))).unwrap();
+    let mut buf = [0u8; 16];
+    let started = Instant::now();
+    let err = std_socket.recv_from(&mut buf).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::WouldBlock);
+    assert!(started.elapsed() < ms(150), "it waited {:?}: the socket is in blocking mode", started.elapsed());
+}
+
+#[test]
+#[should_panic]
+fn the_synchronous_bind_needs_a_runtime_and_says_so_by_panicking_rather_than_misbehaving() {
+    let _ = bind_host_sockets_now(&[HostAddress { ip: "127.0.0.1".parse().unwrap(), interface: "lo".into(), local_preference: 65535 }]);
 }

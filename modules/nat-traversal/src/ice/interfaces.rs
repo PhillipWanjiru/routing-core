@@ -347,9 +347,20 @@ pub struct HostSocket {
 /// been removed, or a link-local one with no scope id) is skipped rather than failing the
 /// whole gather: the remaining addresses are still worth offering.
 pub async fn bind_host_sockets(selected: &[HostAddress]) -> Vec<HostSocket> {
+    bind_host_sockets_now(selected)
+}
+
+/// [`bind_host_sockets`] without an `await`, for callers that are not async (a SIP engine's
+/// synchronous entry point, say). It registers the sockets with the Tokio runtime that is
+/// current on this thread, so it must be called from within one; it panics otherwise.
+pub fn bind_host_sockets_now(selected: &[HostAddress]) -> Vec<HostSocket> {
     let mut out = Vec::new();
     for h in selected {
-        let socket = match UdpSocket::bind(SocketAddr::new(h.ip, 0)).await {
+        let bound = std::net::UdpSocket::bind(SocketAddr::new(h.ip, 0)).and_then(|s| {
+            s.set_nonblocking(true)?;
+            UdpSocket::from_std(s)
+        });
+        let socket = match bound {
             Ok(socket) => socket,
             Err(e) => {
                 tracing::debug!(ip = %h.ip, interface = %h.interface, error = %e, "cannot bind a host candidate; skipping it");
@@ -366,6 +377,11 @@ pub async fn bind_host_sockets(selected: &[HostAddress]) -> Vec<HostSocket> {
         });
     }
     out
+}
+
+/// [`gather_host_sockets`] without an `await`; see [`bind_host_sockets_now`] for what it needs.
+pub fn gather_host_sockets_now(policy: &HostPolicy) -> io::Result<Vec<HostSocket>> {
+    Ok(bind_host_sockets_now(&select_host_addresses(&enumerate_interfaces()?, policy)))
 }
 
 /// Discover the host's addresses, select the ones to offer under `policy`, and bind a

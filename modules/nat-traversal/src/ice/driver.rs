@@ -87,7 +87,19 @@ pub trait RelayPath: Send {
 /// elapses. Returns the agent's final state; the caller keeps the agent and can
 /// read its selected pair.
 pub async fn run_agent(agent: &mut IceAgent, sockets: &[Arc<UdpSocket>], opts: DriveOptions) -> ChecklistState {
-    drive(agent, sockets, None, opts).await
+    drive(agent, sockets, None, None, opts).await
+}
+
+/// [`run_agent`], calling `observer` on every pass of the loop. That is how a call's session
+/// publishes "checking", "completed" and "failed" as they happen, while the agent goes on
+/// answering the peer for as long as the call lasts.
+pub async fn run_agent_observed(
+    agent: &mut IceAgent,
+    sockets: &[Arc<UdpSocket>],
+    opts: DriveOptions,
+    observer: Observer<'_>,
+) -> ChecklistState {
+    drive(agent, sockets, None, Some(observer), opts).await
 }
 
 /// [`run_agent`], with some of the agent's traffic carried through `relay`.
@@ -97,18 +109,37 @@ pub async fn run_agent_relayed(
     relay: &mut (dyn RelayPath + '_),
     opts: DriveOptions,
 ) -> ChecklistState {
-    drive(agent, sockets, Some(relay), opts).await
+    drive(agent, sockets, Some(relay), None, opts).await
 }
+
+/// The socket reader tasks of one run. Dropping a `JoinHandle` does not stop its task, so
+/// without this a run that is cancelled (its future dropped, or its task aborted, which is
+/// how a call's ICE session ends) would leave every reader alive, each holding its socket
+/// open inside `recv_from` until a stray packet happened to arrive.
+struct Readers(Vec<tokio::task::JoinHandle<()>>);
+
+impl Drop for Readers {
+    fn drop(&mut self) {
+        for r in &self.0 {
+            r.abort();
+        }
+    }
+}
+
+/// Called once per pass of the driver loop with the agent, so a caller can watch the state
+/// change *while the run is in progress* rather than only learning the end of it.
+pub type Observer<'a> = &'a mut (dyn FnMut(&IceAgent) + Send);
 
 async fn drive(
     agent: &mut IceAgent,
     sockets: &[Arc<UdpSocket>],
     mut relay: Option<&mut (dyn RelayPath + '_)>,
+    mut observer: Option<Observer<'_>>,
     opts: DriveOptions,
 ) -> ChecklistState {
     let mut by_addr: HashMap<SocketAddr, Arc<UdpSocket>> = HashMap::new();
     let (tx, mut rx) = mpsc::unbounded_channel::<(SocketAddr, SocketAddr, Vec<u8>)>();
-    let mut readers = Vec::new();
+    let mut readers = Readers(Vec::new());
 
     for sock in sockets {
         let Ok(local) = sock.local_addr() else {
@@ -116,7 +147,7 @@ async fn drive(
         };
         by_addr.insert(local, Arc::clone(sock));
         let (sock, tx) = (Arc::clone(sock), tx.clone());
-        readers.push(tokio::spawn(async move {
+        readers.0.push(tokio::spawn(async move {
             let mut buf = vec![0u8; 2048];
             while let Ok((n, from)) = sock.recv_from(&mut buf).await {
                 if tx.send((local, from, buf[..n].to_vec())).is_err() {
@@ -138,6 +169,9 @@ async fn drive(
             send_to_relay(&by_addr, (r.local_addr(), r.server_addr()), datagrams).await;
         }
 
+        if let Some(o) = observer.as_deref_mut() {
+            o(agent);
+        }
         if agent.state() != ChecklistState::Running {
             settled_at.get_or_insert(now);
         }
@@ -175,9 +209,7 @@ async fn drive(
         }
     }
 
-    for r in readers {
-        r.abort();
-    }
+    drop(readers);
     agent.state()
 }
 

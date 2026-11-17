@@ -57,6 +57,12 @@ minor release may change interfaces.
 - `SdpSession::ice_description`: a media section's ICE attributes with RFC 8839's
   session-level inheritance, candidates checked by the strict codec.
 - `IceCredentials::generate`: a random ufrag (48 bits) and password (144 bits).
+- `ice::run_agent_observed`: `run_agent`, calling an observer on every pass of the loop, so a
+  caller can publish "checking", "completed" and "failed" while the agent goes on answering the
+  peer, rather than learning the outcome only when the run ends.
+- `bind_host_sockets_now` and `gather_host_sockets_now`: the host-socket bind without an `await`,
+  for a synchronous caller such as a SIP engine's entry point. They need a Tokio runtime to be
+  current on the calling thread.
 
 ### Changed
 - The `nat-traversal` and `voip-sip` binaries use their library crates instead of recompiling
@@ -65,6 +71,11 @@ minor release may change interfaces.
   media endpoint rather than reached over the IPC bus (see ARCHITECTURE).
 
 ### Fixed
+- A cancelled ICE run left its sockets open. `run_agent` spawns a reader task per socket and
+  tracked them in a plain `Vec<JoinHandle>`, but dropping a `JoinHandle` does not stop a task, so
+  aborting a run (which is how a call's ICE session ends) left every reader alive, each holding
+  its UDP port inside `recv_from` until a stray packet arrived. A busy UAS would have leaked ports
+  on every hang-up. The readers now stop when the run does.
 - The SDP parser dropped every attribute before the first `m=` line, so an offer with its
   `ice-ufrag` and `ice-pwd` at session level, which RFC 8839 allows, looked as if it had no
   ICE credentials.

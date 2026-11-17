@@ -59,6 +59,7 @@ one can quietly agree with a wrong implementation.
 | Randomness: no fallback, held handle | 4 | 4 |
 | SIP-side ICE: parsing, roles, default candidate, SDP writer | 32 | 32 |
 | ICE credential generation | 3 | 3 |
+| ICE driver: cancellation, observer, synchronous bind | 3 | 3 |
 
 Each count is *after* the test fixes described below; the first pass found
 weak tests in three of the four areas.
@@ -117,6 +118,13 @@ pins it exhausts the process's descriptors, which the old per-call open could no
 The SIP side's SDP parser dropped every attribute before the first `m=` line. Nothing had
 noticed, because nothing read ICE from it; the first test of session-level credentials
 failed. A legal ICE offer with its credentials at session level looked as if it had none.
+
+Designing a call's ICE session found a leak in the driver: a run that was cancelled left its
+socket reader tasks, and so its UDP ports, alive, because dropping a task handle does not stop
+the task. A test aborts a run and checks the port really is free. A second mutant, leaving a
+synchronously bound socket in blocking mode, first survived: tokio waits for readiness before
+reading, so the test I had written passed either way. It now takes the socket back from tokio
+and asks the kernel whether a read would block.
 
 ## What is not verified
 
